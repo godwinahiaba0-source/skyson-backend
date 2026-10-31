@@ -15,6 +15,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Serve Frontend Static Files from Root Directory
+app.use(express.static(path.join(__dirname)));
+
 // MySQL Database Pool Connection
 const pool = mysql.createPool({
   host: process.env.DB_HOST || process.env.MYSQLHOST || 'localhost',
@@ -263,7 +266,6 @@ app.post('/api/lease/claim', authenticateToken, async (req, res) => {
 
 app.get('/api/fund/summary', authenticateToken, async (req, res) => {
   try {
-    // 1. Check and complete any active fund investments whose duration has elapsed
     const [activeInvestments] = await pool.query(
       'SELECT * FROM fund_investments WHERE user_id = ? AND status = "Active"',
       [req.user.id]
@@ -275,7 +277,6 @@ app.get('/api/fund/summary', authenticateToken, async (req, res) => {
       const expiryDate = new Date(createdAt.getTime() + inv.days * 24 * 60 * 60 * 1000);
 
       if (now >= expiryDate) {
-        // Plan has completed! Add total return to user balance
         await pool.query('UPDATE users SET balance = balance + ? WHERE id = ?', [inv.total_return, req.user.id]);
         await pool.query('UPDATE fund_investments SET status = "Completed" WHERE id = ?', [inv.id]);
         await pool.query(
@@ -285,7 +286,6 @@ app.get('/api/fund/summary', authenticateToken, async (req, res) => {
       }
     }
 
-    // 2. Fetch updated active invested total
     const [summary] = await pool.query(
       'SELECT SUM(amount) as totalActive FROM fund_investments WHERE user_id = ? AND status = "Active"',
       [req.user.id]
@@ -319,7 +319,6 @@ app.post('/api/fund/invest', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Insufficient account balance.' });
     }
 
-    // Calculate total return: principal + (principal * profit_percent * days)
     const totalReturn = amount + (amount * (selected.profit / 100) * selected.days);
 
     await pool.query('UPDATE users SET balance = balance - ? WHERE id = ?', [amount, req.user.id]);
@@ -362,10 +361,15 @@ app.get('/api/team/report', authenticateToken, async (req, res) => {
   }
 });
 
-// Root check endpoint
-app.get('/', (req, res) => {
-  res.json({ message: 'Skysonsolar single-file API is live!' });
+
+/* ==================== FRONTEND ROUTING FALLBACK ==================== */
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
+
+
+/* ==================== SERVER LISTEN ==================== */
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
