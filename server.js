@@ -98,42 +98,64 @@ initInvestmentWorker(pool);
 // 4. AUTHENTICATION & REGISTRATION
 // ==========================================
 app.post('/api/auth/register', async (req, res) => {
-  const { username, phone, email, password, invitationCode } = req.body;
-  const userPhone = phone || username;
+  const { username, email, password, invitationCode } = req.body;
 
-  if (!userPhone || !password) {
-    return res.status(400).json({ success: false, message: 'Please provide phone/username and password.' });
+  if (!username || !email || !password) {
+    return res.status(400).json({ success: false, message: 'Please provide username, email, and password.' });
   }
 
   try {
-    const [existing] = await pool.query('SELECT user_id FROM users WHERE phone = ?', [userPhone]);
-    if (existing.length > 0) return res.status(400).json({ success: false, message: 'Phone number already registered.' });
+    // 1. Check if username or email already exists
+    const [existing] = await pool.query('SELECT user_id FROM users WHERE username = ? OR email = ?', [username, email]);
+    if (existing.length > 0) {
+      return res.status(400).json({ success: false, message: 'Username or email is already registered.' });
+    }
 
+    // 2. Check total user count to enforce mandatory invitation code rule
+    const [userCountRows] = await pool.query('SELECT COUNT(*) AS totalUsers FROM users');
+    const totalUsers = userCountRows[0].totalUsers || 0;
+
+    let ancestorId = null;
+
+    if (totalUsers > 0) {
+      // Invitation code is mandatory if there are already users in the system
+      if (!invitationCode || invitationCode.trim() === '') {
+        return res.status(400).json({ success: false, message: 'An invitation code is required to register.' });
+      }
+
+      const trimmedCode = invitationCode.trim();
+      const [upline] = await pool.query('SELECT user_id FROM users WHERE referral_code = ? OR invitation_code = ?', [trimmedCode, trimmedCode]);
+
+      if (upline.length === 0) {
+        return res.status(400).json({ success: false, message: 'Invalid invitation code. Please enter a valid code from an existing member.' });
+      }
+
+      ancestorId = upline[0].user_id;
+    }
+
+    // 3. Hash password and generate referral code
     const salt = await bcrypt.genSalt(10);
     const password_hash = await bcrypt.hash(password, salt);
     const referralCode = 'SKY' + Math.floor(1000 + Math.random() * 9000);
 
+    // 4. Insert new user
     const [result] = await pool.query(
-      'INSERT INTO users (phone, password_hash, referral_code, balance, created_at) VALUES (?, ?, ?, 0.00, NOW())',
-      [userPhone, password_hash, referralCode]
+      'INSERT INTO users (username, email, password_hash, referral_code, balance, created_at) VALUES (?, ?, ?, ?, 0.00, NOW())',
+      [username, email, password_hash, referralCode]
     );
 
     const newUserId = result.insertId;
 
-    // Handle upline referral mapping if invitation code was supplied
-    if (invitationCode) {
-      const [upline] = await pool.query('SELECT user_id FROM users WHERE referral_code = ?', [invitationCode]);
-      if (upline.length > 0) {
-        const ancestorId = upline.user_id || upline[0].user_id;
-        await pool.query(
-          'INSERT INTO team_referrals (ancestor_user_id, descendant_user_id, level, created_at) VALUES (?, ?, 1, NOW())',
-          [ancestorId, newUserId]
-        ).catch(() => {});
-      }
+    // 5. Register team referral link if upline exists
+    if (ancestorId) {
+      await pool.query(
+        'INSERT INTO team_referrals (ancestor_user_id, descendant_user_id, level, created_at) VALUES (?, ?, 1, NOW())',
+        [ancestorId, newUserId]
+      ).catch(() => {});
     }
 
-    const token = jwt.sign({ id: newUserId, phone: userPhone }, process.env.JWT_SECRET || 'skyson_secret_key_2026', { expiresIn: '7d' });
-    res.json({ success: true, token, user: { id: newUserId, phone: userPhone, referral_code: referralCode } });
+    const token = jwt.sign({ id: newUserId, username }, process.env.JWT_SECRET || 'skyson_secret_key_2026', { expiresIn: '7d' });
+    res.json({ success: true, token, user: { id: newUserId, username, email, invitationCode: referralCode } });
   } catch (err) {
     console.error('Registration error:', err);
     res.status(500).json({ success: false, message: 'Registration failed.', details: err.message });
@@ -141,28 +163,29 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 app.post('/api/auth/login', async (req, res) => {
-  const { username, phone, password } = req.body;
-  const userPhone = phone || username;
+  const { username, password } = req.body;
+  const loginField = username || req.body.phone;
 
-  if (!userPhone || !password) {
-    return res.status(400).json({ success: false, message: 'Please enter phone and password.' });
+  if (!loginField || !password) {
+    return res.status(400).json({ success: false, message: 'Please enter username/email and password.' });
   }
 
   try {
-    const [users] = await pool.query('SELECT * FROM users WHERE phone = ?', [userPhone]);
-    if (users.length === 0) return res.status(400).json({ success: false, message: 'Invalid phone or password.' });
+    const [users] = await pool.query('SELECT * FROM users WHERE username = ? OR email = ? OR phone = ?', [loginField, loginField, loginField]);
+    if (users.length === 0) return res.status(400).json({ success: false, message: 'Invalid credentials.' });
 
     const user = users[0];
     const valid = await bcrypt.compare(password, user.password_hash || user.password);
-    if (!valid) return res.status(400).json({ success: false, message: 'Invalid phone or password.' });
+    if (!valid) return res.status(400).json({ success: false, message: 'Invalid credentials.' });
 
-    const token = jwt.sign({ id: user.user_id, phone: user.phone }, process.env.JWT_SECRET || 'skyson_secret_key_2026', { expiresIn: '7d' });
+    const token = jwt.sign({ id: user.user_id, username: user.username }, process.env.JWT_SECRET || 'skyson_secret_key_2026', { expiresIn: '7d' });
     res.json({ 
       success: true, 
       token, 
       user: { 
         id: user.user_id, 
-        phone: user.phone, 
+        username: user.username, 
+        email: user.email,
         invitationCode: user.referral_code,
         balance: user.balance 
       } 
@@ -180,7 +203,7 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/user/profile', verifyToken, async (req, res) => {
   try {
     const [rows] = await pool.query(
-      'SELECT user_id, phone, vip_level, avatar_url, balance, fund_password, referral_code FROM users WHERE user_id = ?', 
+      'SELECT user_id, username, email, vip_level, avatar_url, balance, fund_password, referral_code FROM users WHERE user_id = ?', 
       [req.user.id]
     );
     if (rows.length === 0) return res.status(404).json({ success: false, message: 'User not found' });
@@ -190,7 +213,8 @@ app.get('/api/user/profile', verifyToken, async (req, res) => {
       success: true, 
       user: {
         id: user.user_id,
-        phone: user.phone,
+        username: user.username,
+        email: user.email,
         vip_level: user.vip_level,
         avatar_url: user.avatar_url,
         balance: user.balance,
@@ -208,7 +232,7 @@ app.get('/api/user/profile', verifyToken, async (req, res) => {
 app.get('/api/user/account-summary', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const [rows] = await pool.query('SELECT balance, referral_rebate, total_team_benefits, vip_level FROM users WHERE user_id = ?', [userId]);
+    const [rows] = await pool.query('SELECT balance, vip_level FROM users WHERE user_id = ?', [userId]);
     const user = rows.length > 0 ? rows[0] : { balance: 0.00, vip_level: 0 };
 
     const earningTypes = ['yield', 'device_payout', 'payout', 'commission', 'REFERRAL_REBATE', 'earnings'];
@@ -317,7 +341,7 @@ app.get('/api/team/report', verifyToken, async (req, res) => {
     if (level1Ids.length > 0) {
       const placeholders = level1Ids.map(() => '?').join(',');
       const [dRows] = await connection.execute(
-        `SELECT phone as username, CONCAT(phone, '@skyson.com') as email, created_at FROM users WHERE user_id IN (${placeholders}) ORDER BY created_at DESC`,
+        `SELECT username, email, created_at FROM users WHERE user_id IN (${placeholders}) ORDER BY created_at DESC`,
         level1Ids
       );
       downlines = dRows;
