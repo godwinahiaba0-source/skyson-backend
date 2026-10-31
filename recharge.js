@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const pool = require('../config/db');
-const authenticateToken = require('../middleware/auth');
+const pool = require('./db');
+const authenticateToken = require('./auth');
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, 'uploads/'),

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const pool = require('../config/db');
-const authenticateToken = require('../middleware/auth');
+const pool = require('./db');
+const authenticateToken = require('./auth');
 
 // Buy Lease
 router.post('/buy', authenticateToken, async (req, res) => {
