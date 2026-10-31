@@ -12,12 +12,11 @@ const app = express();
 // ==========================================
 // 1. MIDDLEWARE CONFIGURATION
 // ==========================================
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-app.use(express.static(path.join(__dirname))); // Serve frontend HTML/CSS/JS
-
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 // ==========================================
 // 2. DATABASE POOL CONNECTION
 // ==========================================
