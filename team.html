@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Skysonsolar — Team Reports</title>
+<link rel="stylesheet" href="style.css">
+<style>
+/* Header Action Row */
+.header-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.back-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 0;
+  color: #fff;
+  font-size: 22px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.header-nav h1 {
+  font-size: 20px;
+  color: #fff;
+  margin: 0;
+  font-weight: 800;
+}
+.dropdown-btn {
+  background: #fff;
+  color: var(--blue);
+  border: 0;
+  border-radius: 12px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* 3x3 Metric Grid Matching Image */
+.report-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.report-card {
+  border-radius: 16px;
+  padding: 12px 8px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 90px;
+}
+
+/* Light Row Cards */
+.report-card.light {
+  background: #f0f6ff;
+  border: 1px solid #e1eeff;
+}
+.report-card.light .metric-title {
+  font-size: 10px;
+  color: #53719c;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.report-card.light .metric-pill {
+  background: #11a4e1;
+  color: #fff;
+  border-radius: 8px;
+  padding: 6px 4px;
+  font-weight: 800;
+  font-size: 11px;
+}
+
+/* Blue Middle Row Cards */
+.report-card.blue {
+  background: linear-gradient(145deg, #0d6efd, #085ad4);
+  color: #fff;
+}
+.report-card.blue .metric-title {
+  font-size: 10px;
+  color: #d0e2ff;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.report-card.blue .metric-val {
+  font-size: 18px;
+  font-weight: 900;
+  color: #fff;
+}
+
+/* Green Bottom Row Cards */
+.report-card.green {
+  background: linear-gradient(145deg, #12b75a, #0e9649);
+  color: #fff;
+}
+.report-card.green .metric-title {
+  font-size: 10px;
+  color: #d1f7e0;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.report-card.green .metric-val {
+  font-size: 18px;
+  font-weight: 900;
+  color: #fff;
+}
+
+/* Table Section */
+.search-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  outline-color: var(--blue);
+}
+.team-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+.team-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.team-table th, .team-table td {
+  padding: 10px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+.team-table th {
+  color: var(--muted);
+  font-weight: 600;
+  background: #f8fbff;
+}
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--muted);
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">☀️</div>
+      <div>
+        <div class="brand-name">Skysonsolar</div>
+        <div class="tagline">CLEAN ENERGY · GREEN FUTURE</div>
+      </div>
+    </div>
+    <div class="top-actions">
+      <select id="currencySelect" onchange="setCurrency(this.value)" style="padding:6px 4px; border:1px solid #ffffff88; border-radius:9px; background:#fff; color:#06459d; font-size:11px; font-weight:800">
+        <option value="GHS">🇬🇭 GHS</option>
+        <option value="USD">🇺🇸 USD</option>
+      </select>
+      <button style="background:transparent; border:0; color:#fff; font-size:18px; cursor:pointer;" onclick="location.href='team.html'" title="Team">♣</button>
+      <button style="background:transparent; border:0; color:#fff; font-size:18px; cursor:pointer;" onclick="location.href='account.html'" title="Account">👤</button>
+    </div>
+  </header>
+
+  <main class="page">
+    <!-- Header Navigation Row -->
+    <div class="header-nav" style="background: linear-gradient(120deg, #064aa8, #087cf9); margin: -14px -14px 14px; padding: 14px;">
+      <button class="back-btn" onclick="location.href='home.html'">‹</button>
+      <h1>Team Reports</h1>
+      <button class="dropdown-btn">My team ▾</button>
+    </div>
+
+    <!-- 3x3 Metric Grid Matching Image -->
+    <div class="report-grid">
+      <!-- Light Row -->
+      <div class="report-card light">
+        <div class="metric-title">Team recharge</div>
+        <div class="metric-pill" id="valTeamRechargePill">GH₵ 0.00</div>
+      </div>
+      <div class="report-card light">
+        <div class="metric-title">First charges</div>
+        <div class="metric-pill" id="valFirstChargesPill">0</div>
+      </div>
+      <div class="report-card light">
+        <div class="metric-title">Team size</div>
+        <div class="metric-pill" id="valTeamSizePill">0</div>
+      </div>
+
+      <!-- Blue Row -->
+      <div class="report-card blue">
+        <div class="metric-title">Team recharge (GHS)</div>
+        <div class="metric-val" id="valTeamRechargeGhs">0.00</div>
+      </div>
+      <div class="report-card blue">
+        <div class="metric-title">Number of first charge</div>
+        <div class="metric-val" id="valNumFirstCharge">0</div>
+      </div>
+      <div class="report-card blue">
+        <div class="metric-title">Team size</div>
+        <div class="metric-val" id="valTeamSize">0</div>
+      </div>
+
+      <!-- Green Row -->
+      <div class="report-card green">
+        <div class="metric-title">Team withdraw (GHS)</div>
+        <div class="metric-val" id="valTeamWithdraw">0.00</div>
+      </div>
+      <div class="report-card green">
+        <div class="metric-title">Number of first push</div>
+        <div class="metric-val" id="valNumFirstPush">0</div>
+      </div>
+      <div class="report-card green">
+        <div class="metric-title">New team</div>
+        <div class="metric-val" id="valNewTeam">0</div>
+      </div>
+    </div>
+
+    <!-- Invitation Card -->
+    <div class="card">
+      <div class="section-head"><h2>Your Invitation Code</h2></div>
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin:8px 0;">
+        <strong id="userInviteCode" style="font-size:24px; color:var(--blue); letter-spacing:2px">SKY7291</strong>
+        <button class="btn" onclick="copyInviteCode()">Copy Code</button>
+      </div>
+      <p style="font-size:11px; color:var(--muted); margin:0 0 12px">Share your code with friends who want to join.</p>
+      <button class="btn green" style="width:100%" onclick="copyInviteLink()">Invite Friends (Copy Link)</button>
+    </div>
+
+    <!-- Downline Users Table Card -->
+    <div class="card">
+      <div class="section-head">
+        <h2>Level 1 Downlines</h2>
+        <span id="level1CountBadge" class="badge" style="background:#e9f4ff; color:var(--blue); padding:4px 8px; border-radius:8px; font-size:11px; font-weight:800">0 Users</span>
+      </div>
+      
+      <input type="text" class="search-input" id="downlineSearch" placeholder="Search members..." oninput="filterDownlines(this.value)">
+
+      <div class="team-table-wrap">
+        <table class="team-table">
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>Email</th>
+              <th>Joined Date</th>
+            </tr>
+          </thead>
+          <tbody id="downlineTableBody">
+            <tr><td colspan="3" class="empty" style="text-align:center; padding:16px; color:var(--muted)">Loading team data...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="pagination-controls">
+        <span id="paginationInfo">Showing 0 users</span>
+        <div>
+          <button class="btn outline" style="padding:5px 10px; font-size:10px" onclick="changePage(-1)">Prev</button>
+          <button class="btn outline" style="padding:5px 10px; font-size:10px" onclick="changePage(1)">Next</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Bottom Navigation Bar -->
+  <nav class="bottom-nav">
+    <button class="nav-btn" onclick="location.href='home.html'"><span class="nav-icon">⌂</span>Home</button>
+    <button class="nav-btn" onclick="location.href='lease.html'"><span class="nav-icon">⬡</span>Lease</button>
+    <button class="nav-btn active" onclick="location.href='team.html'"><span class="nav-icon">♟</span>Team</button>
+    <button class="nav-btn" onclick="location.href='plan.html'"><span class="nav-icon">▤</span>Plan</button>
+    <button class="nav-btn" onclick="location.href='account.html'"><span class="nav-icon">♙</span>Account</button>
+  </nav>
+</div>
+
+<script>
+const API_BASE_URL = 'https://skyson-backend-production.up.railway.app'; // Replace with live Railway backend URL
+
+let teamMembers = [];
+let filteredMembers = [];
+let currentPage = 1;
+const pageSize = 5;
+
+// Fetch Live Data from Database API
+async function loadLiveTeamData() {
+  const token = localStorage.getItem('skyson_token');
+  const user = JSON.parse(localStorage.getItem('skyson_user') || '{}');
+
+  if (user.invitationCode) {
+    document.getElementById('userInviteCode').textContent = user.invitationCode;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/team/report`, {
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json' 
+      }
+    });
+
+    if (!res.ok) throw new Error('API request failed');
+
+    const data = await res.json();
+
+    // Populate Metrics Grid
+    document.getElementById('valTeamRechargePill').textContent = `GH₵ ${(data.teamRecharge || 0).toFixed(2)}`;
+    document.getElementById('valFirstChargesPill').textContent = data.firstCharges || 0;
+    document.getElementById('valTeamSizePill').textContent = data.teamSize || 0;
+
+    document.getElementById('valTeamRechargeGhs').textContent = (data.teamRecharge || 0).toFixed(2);
+    document.getElementById('valNumFirstCharge').textContent = data.firstCharges || 0;
+    document.getElementById('valTeamSize').textContent = data.teamSize || 0;
+
+    document.getElementById('valTeamWithdraw').textContent = (data.teamWithdraw || 0).toFixed(2);
+    document.getElementById('valNumFirstPush').textContent = data.firstPush || 0;
+    document.getElementById('valNewTeam').textContent = data.newTeam || 0;
+
+    // Populate Downlines List
+    teamMembers = data.downlines || [];
+    filteredMembers = [...teamMembers];
+    renderTable();
+
+  } catch (err) {
+    // Fallback test data if backend route is not active yet
+    teamMembers = [];
+    filteredMembers = [];
+    renderTable();
+  }
+}
+
+function renderTable() {
+  const body = document.getElementById('downlineTableBody');
+  document.getElementById('level1CountBadge').textContent = `${filteredMembers.length} Users`;
+
+  if (filteredMembers.length === 0) {
+    body.innerHTML = `<tr><td colspan="3" class="empty" style="text-align:center; padding:16px; color:var(--muted)">No team members found.</td></tr>`;
+    document.getElementById('paginationInfo').textContent = 'Showing 0 users';
+    return;
+  }
+
+  const start = (currentPage - 1) * pageSize;
+  const end = start + pageSize;
+  const pageData = filteredMembers.slice(start, end);
+
+  body.innerHTML = pageData.map(m => `
+    <tr>
+      <td><strong>${m.username || 'User'}</strong></td>
+      <td>${m.email || 'N/A'}</td>
+      <td>${m.createdAt ? new Date(m.createdAt).toLocaleDateString() : 'Recent'}</td>
+    </tr>
+  `).join('');
+
+  document.getElementById('paginationInfo').textContent = `Showing ${start + 1}-${Math.min(end, filteredMembers.length)} of ${filteredMembers.length}`;
+}
+
+function filterDownlines(query) {
+  const q = query.toLowerCase().trim();
+  filteredMembers = teamMembers.filter(m => 
+    (m.username && m.username.toLowerCase().includes(q)) || (m.email && m.email.toLowerCase().includes(q))
+  );
+  currentPage = 1;
+  renderTable();
+}
+
+function changePage(delta) {
+  const maxPage = Math.ceil(filteredMembers.length / pageSize) || 1;
+  if (currentPage + delta >= 1 && currentPage + delta <= maxPage) {
+    currentPage += delta;
+    renderTable();
+  }
+}
+
+function copyInviteCode() {
+  const code = document.getElementById('userInviteCode').textContent;
+  navigator.clipboard.writeText(code).then(() => alert('Invitation code copied!'));
+}
+
+function copyInviteLink() {
+  const code = document.getElementById('userInviteCode').textContent;
+  const link = `${window.location.origin}${window.location.pathname.replace('team.html', 'index.html')}?invite=${code}`;
+  navigator.clipboard.writeText(link).then(() => alert('Invitation link copied!'));
+}
+
+function setCurrency(c) {
+  // Currency switcher hook
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  if (!localStorage.getItem('skyson_token')) {
+    window.location.href = 'index.html';
+  } else {
+    loadLiveTeamData();
+  }
+});
+</script>
+</body>
+</html>

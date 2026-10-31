@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Skysonsolar — Home</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <!-- Consistent Topbar Header with Currency & Utilities -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">☀️</div>
+      <div>
+        <div class="brand-name">Skysonsolar</div>
+        <div class="tagline">CLEAN ENERGY · GREEN FUTURE</div>
+      </div>
+    </div>
+    <div class="top-actions">
+      <select id="currencySelect" onchange="setCurrency(this.value)" style="padding:6px 4px; border:1px solid #ffffff88; border-radius:9px; background:#fff; color:#06459d; font-size:11px; font-weight:800">
+        <option value="GHS">🇬🇭 GHS</option>
+        <option value="USD">🇺🇸 USD</option>
+      </select>
+      <button style="background:transparent; border:0; color:#fff; font-size:18px; cursor:pointer;" onclick="location.href='team.html'" title="Team">♣</button>
+      <button style="background:transparent; border:0; color:#fff; font-size:18px; cursor:pointer;" onclick="location.href='account.html'" title="Account">👤</button>
+    </div>
+  </header>
+
+  <main class="page">
+    <!-- Hero Banner with Rotating Images & Stable Sun -->
+    <div class="hero">
+      <div class="hero-slides">
+        <img class="active" src="solar-1.jpg" alt="Solar 1">
+        <img src="solar-2.jpg" alt="Solar 2">
+        <img src="solar-3.jpg" alt="Solar 3">
+      </div>
+      <div class="hero-shade"></div>
+      <div class="hero-sun">☀️</div>
+      <h1>Welcome to Skysonsolar</h1>
+      <p>Clean energy solutions for a brighter and more sustainable tomorrow.</p>
+      <div class="pill-row">
+        <span>✓ Safe & Secure</span>
+        <span>ϟ Clean Energy</span>
+        <span>♧ Green Future</span>
+      </div>
+    </div>
+
+    <!-- Live Balance Stats (Initialized at 0.00) -->
+    <div class="card stats">
+      <div class="stat"><div class="stat-label">Total Balance (withdrawable)</div><div class="stat-value" id="balanceDisplay">GH₵ 0.00</div></div>
+      <div class="stat"><div class="stat-label">Today's Earnings</div><div class="stat-value green small" id="todayDisplay">GH₵ 0.00</div></div>
+      <div class="stat"><div class="stat-label">Yesterday's Earnings</div><div class="stat-value green small" id="yesterdayDisplay">GH₵ 0.00</div></div>
+      <div class="stat"><div class="stat-label">Total Deposit Amount (lease only)</div><div class="stat-value small" id="depositDisplay">GH₵ 0.00</div></div>
+    </div>
+
+    <!-- Shortcuts Grid -->
+    <div class="card shortcuts">
+      <button class="shortcut" onclick="location.href='recharge.html'"><span class="bubble">▣</span>Recharge</button>
+      <!-- Withdraw shortcut button linked to withdraw.html -->
+      <button class="shortcut" onclick="location.href='withdraw.html'"><span class="bubble green">⇧</span>Withdraw</button>
+      <button class="shortcut" onclick="location.href='bonus.html'"><span class="bubble orange">🎁</span>Bonus</button>
+      <button class="shortcut" onclick="location.href='team.html'"><span class="bubble purple">♟</span>My Invitation</button>
+      <button class="shortcut" onclick="location.href='savings.html'"><span class="bubble pink">♧</span>Savings</button>
+      <button class="shortcut" onclick="location.href='task.html'"><span class="bubble teal">▤</span>Task Center</button>
+      <button class="shortcut" onclick="window.open('https://t.me/DaisyEmily01','_blank')"><span class="bubble">☏</span>Customer Service</button>
+      <button class="shortcut" onclick="window.open('https://t.me/+Cyig_WpOo5k1NzBk','_blank')"><span class="bubble purple">➤</span>Telegram</button>
+    </div>
+
+    <!-- Bonus Banner -->
+    <div class="bonus-banner">
+      <div class="gift">🎁</div>
+      <div style="flex:1">
+        <h2>BONUS</h2>
+        <p>Check your eligibility and claim available rewards.</p>
+      </div>
+      <div class="bonus-side">
+        <strong>GH₵ 10.00</strong>
+        <button class="btn gold" onclick="location.href='bonus.html'">Claim Bonus →</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-head">
+        <h2>Recent Activity</h2>
+        <button class="btn outline" onclick="location.href='transaction.html'">View all →</button>
+      </div>
+      <div id="homeActivity" class="empty">Your activity will appear here.</div>
+    </div>
+  </main>
+
+  <nav class="bottom-nav">
+    <button class="nav-btn active" onclick="location.href='home.html'"><span class="nav-icon">⌂</span>Home</button>
+    <button class="nav-btn" onclick="location.href='lease.html'"><span class="nav-icon">⬡</span>Lease</button>
+    <button class="nav-btn" onclick="location.href='team.html'"><span class="nav-icon">♟</span>Team</button>
+    <button class="nav-btn" onclick="location.href='plan.html'"><span class="nav-icon">▤</span>Plan</button>
+    <button class="nav-btn" onclick="location.href='account.html'"><span class="nav-icon">♙</span>Account</button>
+  </nav>
+</div>
+
+<script>
+let displayCurrency = 'GHS';
+
+// Format currency display based on selected currency
+function money(val) {
+  const num = Number(val) || 0;
+  const valConv = displayCurrency === 'USD' ? num / 12 : num;
+  return (displayCurrency === 'USD' ? '$' : 'GH₵ ') + valConv.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function setCurrency(c) {
+  displayCurrency = c;
+  fetchLiveDashboardData();
+}
+
+// Fetch live user financial stats from your database backend
+async function fetchLiveDashboardData() {
+  const token = localStorage.getItem('skyson_token');
+  if (!token) {
+    window.location.href = 'index.html';
+    return;
+  }
+
+  try {
+    const res = await fetch('https://skyson-backend-production.up.railway.app/api/user/dashboard', {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!res.ok) throw new Error('Failed to fetch dashboard stats');
+
+    const data = await res.json();
+
+    // Populate live data from database
+    document.getElementById('balanceDisplay').textContent = money(data.balance || 0);
+    document.getElementById('todayDisplay').textContent = money(data.todayEarnings || 0);
+    document.getElementById('yesterdayDisplay').textContent = money(data.yesterdayEarnings || 0);
+    document.getElementById('depositDisplay').textContent = money(data.totalDeposit || 0);
+
+  } catch (err) {
+    // Default clean 0.00 state for brand new project before backend routes are written
+    document.getElementById('balanceDisplay').textContent = money(0);
+    document.getElementById('todayDisplay').textContent = money(0);
+    document.getElementById('yesterdayDisplay').textContent = money(0);
+    document.getElementById('depositDisplay').textContent = money(0);
+  }
+}
+
+// Background image rotation timer (every 4 seconds)
+const slides = document.querySelectorAll('.hero-slides img');
+let currentSlide = 0;
+if (slides.length > 0) {
+  setInterval(() => {
+    slides[currentSlide].classList.remove('active');
+    currentSlide = (currentSlide + 1) % slides.length;
+    slides[currentSlide].classList.add('active');
+  }, 4000);
+}
+
+// Run on page load
+window.addEventListener('DOMContentLoaded', () => {
+  if (!localStorage.getItem('skyson_token')) {
+    window.location.href = 'index.html';
+  } else {
+    fetchLiveDashboardData();
+  }
+});
+</script>
+</body>
+</html>
