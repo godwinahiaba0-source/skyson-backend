@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const db = '../config/db'; // handled via server or passed down, let's use db directly
+const db = './db'; // handled via server or passed down, let's use db directly
 const pool = require('./db');
 
 // Register
