@@ -10,13 +10,24 @@ const path = require('path');
 const app = express();
 
 // ==========================================
+// ==========================================
+// ==========================================
 // 1. MIDDLEWARE CONFIGURATION
 // ==========================================
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
 }));
+
+// Handle preflight OPTIONS requests explicitly
+app.options('*', cors());
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use(express.static(path.join(__dirname))); // Serve frontend HTML/CSS/JS
 // ==========================================
 // 2. DATABASE POOL CONNECTION
 // ==========================================
