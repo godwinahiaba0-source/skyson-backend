@@ -1,3 +1,16 @@
+const mysql = require('mysql2/promise');
+
+const pool = mysql.createPool({
+  host: process.env.DB_HOST || process.env.MYSQLHOST || 'localhost',
+  user: process.env.DB_USER || process.env.MYSQLUSER || 'root',
+  password: process.env.DB_PASSWORD || process.env.MYSQLPASSWORD || '',
+  database: process.env.DB_NAME || process.env.MYSQLDATABASE || 'skysonsolar',
+  port: process.env.MYSQLPORT || 3306,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+});
+
 const initDb = async () => {
   try {
     const connection = await pool.getConnection();
@@ -17,20 +30,41 @@ const initDb = async () => {
     `);
 
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS team_referrals (
+      CREATE TABLE IF NOT EXISTS recharges (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        ancestor_user_id INT,
-        descendant_user_id INT,
-        level INT DEFAULT 1,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        user_id INT,
+        amount DECIMAL(10,2) NOT NULL,
+        channel VARCHAR(50) NOT NULL,
+        transaction_id VARCHAR(100),
+        reference VARCHAR(50),
+        proof_image VARCHAR(255),
+        status VARCHAR(20) DEFAULT 'Pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+      )
+    `);
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS leases (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT,
+        plan_name VARCHAR(100) NOT NULL,
+        price DECIMAL(10,2) NOT NULL,
+        daily_income DECIMAL(10,2) NOT NULL,
+        duration INT NOT NULL,
+        last_claim_time TIMESTAMP NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
       )
     `);
 
     connection.release();
-    console.log("Database tables initialized successfully!");
+    console.log("Database tables verified and ready!");
   } catch (err) {
     console.error("Database initialization failed details:", err.message);
   }
 };
 
 initDb();
+
+module.exports = pool;
