@@ -364,7 +364,7 @@ app.get('/api/team/report', authenticateToken, async (req, res) => {
 
 /* ==================== FRONTEND ROUTING FALLBACK ==================== */
 
-app.get('*', (req, res) => {
+app.get('/*', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
