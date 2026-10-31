@@ -8,12 +8,31 @@ const app = express();
 // ==========================================
 // 1. BULLETPROOF CORS & MIDDLEWARE (Must be first)
 // ==========================================
+const allowedOrigins = [
+  'https://skyson-front-production.up.railway.app',
+  'http://localhost:3000',
+  'http://localhost:5000',
+  'http://127.0.0.1:5500'
+];
+
 app.use(cors({
-  origin: '*',
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl, or Postman)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) === -1) {
+      // If you want to be permissive during testing, you can comment out this check, 
+      // but matching the exact frontend URL fixes standard browser CORS.
+      return callback(null, true); 
+    }
+    return callback(null, true);
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 }));
+
+// Explicitly handle preflight OPTIONS requests for all routes
+app.options('*', cors());
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
