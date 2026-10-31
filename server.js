@@ -45,7 +45,6 @@ const authenticateToken = (req, res, next) => {
 
 /* ==================== AUTH ROUTES ==================== */
 
-// Register User
 app.post('/api/auth/register', async (req, res) => {
   const { username, email, password, invitationCode } = req.body;
   if (!username || !email || !password) {
@@ -69,7 +68,6 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-// Login User
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
@@ -91,46 +89,9 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Update Login Password
-app.post('/api/auth/update-password', authenticateToken, async (req, res) => {
-  const { currentPassword, newPassword } = req.body;
-  if (!currentPassword || !newPassword || newPassword.length < 8) {
-    return res.status(400).json({ error: 'New password must be at least 8 characters.' });
-  }
-
-  try {
-    const [users] = await pool.query('SELECT * FROM users WHERE id = ?', [req.user.id]);
-    const valid = await bcrypt.compare(currentPassword, users[0].password);
-    if (!valid) return res.status(400).json({ error: 'Current password is incorrect.' });
-
-    const hashed = await bcrypt.hash(newPassword, 10);
-    await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashed, req.user.id]);
-    res.json({ message: 'Login password updated successfully!' });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to update password.', details: err.message });
-  }
-});
-
-// Update Fund Password
-app.post('/api/auth/update-fund-password', authenticateToken, async (req, res) => {
-  const { currentPassword, newFundPassword } = req.body;
-  try {
-    const [users] = await pool.query('SELECT * FROM users WHERE id = ?', [req.user.id]);
-    const valid = await bcrypt.compare(currentPassword, users[0].password);
-    if (!valid) return res.status(400).json({ error: 'Current login password incorrect.' });
-
-    const hashedFund = await bcrypt.hash(newFundPassword, 10);
-    await pool.query('UPDATE users SET fund_password = ? WHERE id = ?', [hashedFund, req.user.id]);
-    res.json({ message: 'Fund password updated successfully!' });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to update fund password.', details: err.message });
-  }
-});
-
 
 /* ==================== USER & DASHBOARD ROUTES ==================== */
 
-// Get Dashboard Summary
 app.get('/api/user/dashboard', authenticateToken, async (req, res) => {
   try {
     const [users] = await pool.query('SELECT balance FROM users WHERE id = ?', [req.user.id]);
@@ -147,7 +108,6 @@ app.get('/api/user/dashboard', authenticateToken, async (req, res) => {
   }
 });
 
-// Get Profile
 app.get('/api/user/profile', authenticateToken, async (req, res) => {
   try {
     const [users] = await pool.query('SELECT id, phone, invitation_code, created_at FROM users WHERE id = ?', [req.user.id]);
@@ -163,11 +123,6 @@ app.get('/api/user/profile', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/user/profile', authenticateToken, async (req, res) => {
-  res.json({ message: 'Profile updated successfully!' });
-});
-
-// Bank Card Binding
 app.get('/api/bankcard', authenticateToken, async (req, res) => {
   try {
     const [cards] = await pool.query('SELECT * FROM bank_cards WHERE user_id = ? ORDER BY id DESC LIMIT 1', [req.user.id]);
@@ -189,7 +144,6 @@ app.post('/api/bankcard', authenticateToken, async (req, res) => {
   }
 });
 
-// Withdrawal Request
 app.post('/api/user/withdraw', authenticateToken, async (req, res) => {
   const { amount, channel, accountNumber } = req.body;
   if (!amount || amount < 50) return res.status(400).json({ error: 'Minimum withdrawal is GH₵ 50.00' });
@@ -215,7 +169,6 @@ app.post('/api/user/withdraw', authenticateToken, async (req, res) => {
   }
 });
 
-// Transaction History
 app.get('/api/user/transactions', authenticateToken, async (req, res) => {
   try {
     const [records] = await pool.query('SELECT type, description, amount, status, created_at as date FROM transactions WHERE user_id = ? ORDER BY id DESC', [req.user.id]);
@@ -306,7 +259,86 @@ app.post('/api/lease/claim', authenticateToken, async (req, res) => {
 });
 
 
-/* ==================== BONUS, TEAM & FUND ROUTES ==================== */
+/* ==================== FUND SAVINGS ROUTES (WITH AUTO-COMPLETION & PAYOUT) ==================== */
+
+app.get('/api/fund/summary', authenticateToken, async (req, res) => {
+  try {
+    // 1. Check and complete any active fund investments whose duration has elapsed
+    const [activeInvestments] = await pool.query(
+      'SELECT * FROM fund_investments WHERE user_id = ? AND status = "Active"',
+      [req.user.id]
+    );
+
+    const now = new Date();
+    for (let inv of activeInvestments) {
+      const createdAt = new Date(inv.created_at);
+      const expiryDate = new Date(createdAt.getTime() + inv.days * 24 * 60 * 60 * 1000);
+
+      if (now >= expiryDate) {
+        // Plan has completed! Add total return to user balance
+        await pool.query('UPDATE users SET balance = balance + ? WHERE id = ?', [inv.total_return, req.user.id]);
+        await pool.query('UPDATE fund_investments SET status = "Completed" WHERE id = ?', [inv.id]);
+        await pool.query(
+          'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
+          [req.user.id, 'fund_payout', `Completed ${inv.plan_name} Payout`, inv.total_return, 'Success']
+        );
+      }
+    }
+
+    // 2. Fetch updated active invested total
+    const [summary] = await pool.query(
+      'SELECT SUM(amount) as totalActive FROM fund_investments WHERE user_id = ? AND status = "Active"',
+      [req.user.id]
+    );
+
+    res.json({
+      totalActive: parseFloat(summary[0].totalActive || 0),
+      todayEarnings: 0.00
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Error fetching fund summary.' });
+  }
+});
+
+app.post('/api/fund/invest', authenticateToken, async (req, res) => {
+  const { planId, amount } = req.body;
+  const plans = {
+    1: { name: '3 Days Cycle', days: 3, profit: 2.0, min: 50 },
+    2: { name: '7 Days Cycle', days: 7, profit: 5.0, min: 100 },
+    3: { name: '200 Days Cycle', days: 200, profit: 250.0, min: 1000 }
+  };
+
+  const selected = plans[planId];
+  if (!selected || amount < selected.min) {
+    return res.status(400).json({ error: 'Invalid plan or amount below minimum.' });
+  }
+
+  try {
+    const [users] = await pool.query('SELECT balance FROM users WHERE id = ?', [req.user.id]);
+    if (users[0].balance < amount) {
+      return res.status(400).json({ error: 'Insufficient account balance.' });
+    }
+
+    // Calculate total return: principal + (principal * profit_percent * days)
+    const totalReturn = amount + (amount * (selected.profit / 100) * selected.days);
+
+    await pool.query('UPDATE users SET balance = balance - ? WHERE id = ?', [amount, req.user.id]);
+    await pool.query(
+      'INSERT INTO fund_investments (user_id, plan_id, plan_name, amount, days, profit_percent, total_return, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [req.user.id, planId, selected.name, amount, selected.days, selected.profit, totalReturn, 'Active']
+    );
+    await pool.query('INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
+      [req.user.id, 'fund_investment', `Invested in ${selected.name}`, -amount, 'Success']
+    );
+
+    res.json({ message: 'Investment submitted successfully!' });
+  } catch (err) {
+    res.status(500).json({ error: 'Investment failed.' });
+  }
+});
+
+
+/* ==================== BONUS & TEAM ROUTES ==================== */
 
 app.post('/api/bonus/claim', authenticateToken, async (req, res) => {
   const { code } = req.body;
@@ -321,10 +353,6 @@ app.post('/api/bonus/claim', authenticateToken, async (req, res) => {
   res.status(400).json({ error: 'Invalid or expired bonus code.' });
 });
 
-app.get('/api/bonus/history', authenticateToken, async (req, res) => {
-  res.json({ claims: [] });
-});
-
 app.get('/api/team/report', authenticateToken, async (req, res) => {
   try {
     const [downlines] = await pool.query('SELECT phone as username, CONCAT(phone, "@skyson.com") as email, created_at FROM users WHERE id != ?', [req.user.id]);
@@ -332,14 +360,6 @@ app.get('/api/team/report', authenticateToken, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Error fetching team report.' });
   }
-});
-
-app.get('/api/fund/summary', authenticateToken, async (req, res) => {
-  res.json({ totalActive: 0, todayEarnings: 0 });
-});
-
-app.post('/api/fund/invest', authenticateToken, async (req, res) => {
-  res.json({ message: 'Investment successful!' });
 });
 
 // Root check endpoint
