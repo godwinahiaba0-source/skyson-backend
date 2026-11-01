@@ -37,20 +37,22 @@ router.post('/register', async (req, res) => {
       user: { id: result.insertId, username, email }
     });
   } catch (err) {
+    console.error('CRITICAL REGISTER ERROR:', err);
     res.status(500).json({ message: 'Server error during registration.', error: err.message });
   }
 });
 
 // Login
 router.post('/login', async (req, res) => {
-  const { username, password } = req.body;
-  const identifier = username || req.body.email || req.body.phone;
-
-  if (!identifier || !password) {
-    return res.status(400).json({ message: 'Username/Email and password are required.' });
-  }
-
   try {
+    console.log('LOGIN HIT WITH BODY:', req.body);
+    const { username, password } = req.body;
+    const identifier = username || req.body.email || req.body.phone;
+
+    if (!identifier || !password) {
+      return res.status(400).json({ message: 'Username/Email and password are required.' });
+    }
+
     const [users] = await pool.query(
       'SELECT * FROM users WHERE username = ? OR email = ? OR phone = ?',
       [identifier, identifier, identifier]
@@ -83,6 +85,7 @@ router.post('/login', async (req, res) => {
       }
     });
   } catch (err) {
+    console.error('CRITICAL LOGIN ERROR:', err);
     res.status(500).json({ message: 'Server error during login.', error: err.message });
   }
 });
