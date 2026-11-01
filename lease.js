@@ -3,7 +3,7 @@ const router = express.Router();
 const pool = require('./db');
 const jwt = require('jsonwebtoken');
 
-// Token verification middleware matching your backend auth setup
+// Token verification middleware
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -16,7 +16,7 @@ const verifyToken = (req, res, next) => {
   });
 };
 
-// Buy Lease (Deducts strictly from deposit_balance & prevents duplicate purchases)
+// Buy Lease (Deducts strictly from deposit_balance & logs transaction)
 router.post('/buy', verifyToken, async (req, res) => {
   const { plan_name, price, daily_income, duration } = req.body;
   if (!plan_name || !price || !daily_income || !duration) {
@@ -67,6 +67,12 @@ router.post('/buy', verifyToken, async (req, res) => {
       [req.user.id, plan_name, planPrice, daily_income, duration]
     );
 
+    // Log transaction history
+    await connection.query(
+      'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
+      [req.user.id, 'recharge', `Leased ${plan_name}`, -planPrice, 'success']
+    );
+
     await connection.commit();
     connection.release();
 
@@ -79,7 +85,7 @@ router.post('/buy', verifyToken, async (req, res) => {
   }
 });
 
-// Claim Daily Income (Adds to withdrawable balance)
+// Claim Daily Income (Adds to withdrawable balance & logs earnings transaction)
 router.post('/claim', verifyToken, async (req, res) => {
   const { leaseId } = req.body;
   if (!leaseId) {
@@ -115,6 +121,12 @@ router.post('/claim', verifyToken, async (req, res) => {
 
     // Update last claim timestamp
     await connection.query('UPDATE leases SET last_claim_time = NOW() WHERE id = ?', [leaseId]);
+
+    // Log transaction history for earnings claim
+    await connection.query(
+      'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
+      [req.user.id, 'earnings', `Daily Income Claim (${lease.plan_name})`, dailyEarnings, 'success']
+    );
 
     await connection.commit();
     connection.release();

@@ -52,7 +52,6 @@ router.get('/profile', verifyToken, async (req, res) => {
 });
 
 // Dashboard Route (Live data for account & home stats)
-// Dashboard Route (Live data for account & home stats)
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -85,6 +84,20 @@ router.get('/dashboard', verifyToken, async (req, res) => {
   } catch (err) {
     console.error('Dashboard stats error:', err);
     res.status(500).json({ message: 'Error fetching dashboard stats.' });
+  }
+});
+
+// GET User Transactions (Fetches activity history from database)
+router.get('/transactions', verifyToken, async (req, res) => {
+  try {
+    const [records] = await pool.query(
+      'SELECT id, type, description, amount, status, created_at as date FROM transactions WHERE user_id = ? ORDER BY created_at DESC',
+      [req.user.id]
+    );
+    res.json({ success: true, records });
+  } catch (err) {
+    console.error('Fetch transactions error:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch transactions.', records: [] });
   }
 });
 
