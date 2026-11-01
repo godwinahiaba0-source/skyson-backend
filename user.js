@@ -68,14 +68,12 @@ router.get('/team/report', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Get total team size
     const [teamSizeRows] = await pool.query(
       'SELECT COUNT(*) as count FROM team_referrals WHERE ancestor_user_id = ?',
       [userId]
     );
     const teamSize = teamSizeRows[0].count || 0;
 
-    // Get team recharge total
     const [rechargeRows] = await pool.query(`
       SELECT COALESCE(SUM(d.amount), 0) as total_recharge 
       FROM deposits d
@@ -84,7 +82,6 @@ router.get('/team/report', verifyToken, async (req, res) => {
     `, [userId]);
     const teamRecharge = rechargeRows[0].total_recharge || 0;
 
-    // Get team withdraw total
     const [withdrawRows] = await pool.query(`
       SELECT COALESCE(SUM(w.amount), 0) as total_withdraw 
       FROM withdrawals w
@@ -98,7 +95,7 @@ router.get('/team/report', verifyToken, async (req, res) => {
       teamWithdraw,
       teamSize,
       firstChargeCount: 0,
-      firstPushCount: 0,
+      firstPushCount: teamSize,
       newTeamCount: teamSize
     });
   } catch (err) {
@@ -107,8 +104,8 @@ router.get('/team/report', verifyToken, async (req, res) => {
   }
 });
 
-// Get user's team members / referrals by level
-router.get('/user/team/members', verifyToken, async (req, res) => {
+// Shared handler for fetching team members
+const handleFetchTeamMembers = async (req, res) => {
   try {
     const [members] = await pool.query(`
       SELECT 
@@ -124,12 +121,15 @@ router.get('/user/team/members', verifyToken, async (req, res) => {
       ORDER BY tr.level ASC, u.created_at DESC
     `, [req.user.id]);
 
-    // Send both as an array and wrapped object to satisfy any frontend variation
-    res.json(members);
+    res.json({ success: true, members });
   } catch (err) {
     console.error('Fetch team members error:', err);
     res.status(500).json({ success: false, message: 'Failed to fetch team members.', members: [] });
   }
-});
+};
+
+// Register both paths to prevent 404 routing mismatches
+router.get('/team/members', verifyToken, handleFetchTeamMembers);
+router.get('/user/team/members', verifyToken, handleFetchTeamMembers);
 
 module.exports = router;
