@@ -1,10 +1,23 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('./db');
-const authenticateToken = require('./auth');
+const jwt = require('jsonwebtoken');
 
-// Buy Lease (Deducts from deposit_balance - Lease Only)
-router.post('/buy', authenticateToken, async (req, res) => {
+// Token verification middleware matching your backend auth setup
+const verifyToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) return res.status(401).json({ message: 'No token provided.' });
+
+  jwt.verify(token, process.env.JWT_SECRET || 'skyson_secure_super_secret_key_2026', (err, user) => {
+    if (err) return res.status(403).json({ message: 'Invalid or expired token.' });
+    req.user = user;
+    next();
+  });
+};
+
+// Buy Lease (Deducts strictly from deposit_balance)
+router.post('/buy', verifyToken, async (req, res) => {
   const { plan_name, price, daily_income, duration } = req.body;
   if (!plan_name || !price || !daily_income || !duration) {
     return res.status(400).json({ message: 'All plan details are required.' });
@@ -55,7 +68,7 @@ router.post('/buy', authenticateToken, async (req, res) => {
 });
 
 // Claim Daily Income (Adds to withdrawable balance)
-router.post('/claim', authenticateToken, async (req, res) => {
+router.post('/claim', verifyToken, async (req, res) => {
   const { leaseId } = req.body;
   if (!leaseId) {
     return res.status(400).json({ message: 'Lease ID is required.' });
@@ -77,7 +90,6 @@ router.post('/claim', authenticateToken, async (req, res) => {
     const lastClaim = new Date(lease.last_claim_time);
     const hoursSinceLastClaim = (now - lastClaim) / (1000 * 60 * 60);
 
-    // Enforce 24-hour claim window
     if (hoursSinceLastClaim < 24) {
       await connection.rollback();
       connection.release();
@@ -105,7 +117,7 @@ router.post('/claim', authenticateToken, async (req, res) => {
 });
 
 // Get My Leases
-router.get('/my-leases', authenticateToken, async (req, res) => {
+router.get('/my-leases', verifyToken, async (req, res) => {
   try {
     const [leases] = await pool.query('SELECT * FROM leases WHERE user_id = ? ORDER BY created_at DESC', [req.user.id]);
     res.json({ leases });
