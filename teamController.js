@@ -42,16 +42,17 @@ const getTeamReport = async (req, res) => {
             if (ids && ids.length > 0) {
                 const placeholders = ids.map(() => '?').join(',');
                 
-                // Calculate total approved recharges for this specific level from the deposits table
+                // Calculate total approved recharges for this specific level safely
                 const [rechargeRows] = await pool.query(
                     `SELECT COALESCE(SUM(amount), 0) as total_recharge, COUNT(DISTINCT user_id) as recharge_count 
                      FROM deposits 
                      WHERE user_id IN (${placeholders}) AND status = 'approved'`,
                     ids
-                ).catch(() => [{ total_recharge: 0, recharge_count: 0 }]);
+                ).catch(() => [[{ total_recharge: 0, recharge_count: 0 }]]);
                 
-                lvlRechargeAmount = parseFloat(rechargeRows[0].total_recharge || 0);
-                lvlRechargeNumber = parseInt(rechargeRows[0].recharge_count || 0, 10);
+                const row = Array.isArray(rechargeRows) ? rechargeRows[0] : rechargeRows;
+                lvlRechargeAmount = parseFloat(row?.total_recharge || 0);
+                lvlRechargeNumber = parseInt(row?.recharge_count || 0, 10);
             }
 
             levelDetails[lvl] = {
@@ -67,20 +68,23 @@ const getTeamReport = async (req, res) => {
             const [globalRecharge] = await pool.query(
                 `SELECT COALESCE(SUM(amount), 0) as total FROM deposits WHERE user_id IN (${placeholders}) AND status = 'approved'`,
                 allTeamIds
-            ).catch(() => [{ total: 0 }]);
-            totalTeamRecharge = parseFloat(globalRecharge[0].total || 0);
+            ).catch(() => [[{ total: 0 }]]);
+            const gRechargeRow = Array.isArray(globalRecharge) ? globalRecharge[0] : globalRecharge;
+            totalTeamRecharge = parseFloat(gRechargeRow?.total || 0);
 
             const [globalWithdraw] = await pool.query(
                 `SELECT COALESCE(SUM(amount), 0) as total FROM withdrawals WHERE user_id IN (${placeholders}) AND status = 'approved'`,
                 allTeamIds
-            ).catch(() => [{ total: 0 }]);
-            totalTeamWithdraw = parseFloat(globalWithdraw[0].total || 0);
+            ).catch(() => [[{ total: 0 }]]);
+            const gWithdrawRow = Array.isArray(globalWithdraw) ? globalWithdraw[0] : globalWithdraw;
+            totalTeamWithdraw = parseFloat(gWithdrawRow?.total || 0);
 
             const [firstCharge] = await pool.query(
                 `SELECT COUNT(DISTINCT user_id) as cnt FROM deposits WHERE user_id IN (${placeholders}) AND status = 'approved'`,
                 allTeamIds
-            ).catch(() => [{ cnt: 0 }]);
-            totalFirstChargeCount = parseInt(firstCharge[0].cnt || 0, 10);
+            ).catch(() => [[{ cnt: 0 }]]);
+            const fChargeRow = Array.isArray(firstCharge) ? firstCharge[0] : firstCharge;
+            totalFirstChargeCount = parseInt(fChargeRow?.cnt || 0, 10);
         }
 
         res.json({
