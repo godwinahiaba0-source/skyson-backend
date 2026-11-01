@@ -61,9 +61,9 @@ router.post('/buy', verifyToken, async (req, res) => {
     // Deduct from deposit_balance
     await connection.query('UPDATE users SET deposit_balance = deposit_balance - ? WHERE id = ?', [planPrice, req.user.id]);
     
-    // Create active lease record
+    // Create active lease record (with is_claimed = 0)
     await connection.query(
-      'INSERT INTO leases (user_id, plan_name, price, daily_income, duration, last_claim_time) VALUES (?, ?, ?, ?, ?, NOW())',
+      'INSERT INTO leases (user_id, plan_name, price, daily_income, duration, is_claimed) VALUES (?, ?, ?, ?, ?, 0)',
       [req.user.id, plan_name, planPrice, daily_income, duration]
     );
 
@@ -85,7 +85,7 @@ router.post('/buy', verifyToken, async (req, res) => {
   }
 });
 
-// Claim Daily Income (Adds instantly to withdrawable balance & logs earnings transaction)
+// Claim Daily Income (Strictly 1 claim per product lease)
 router.post('/claim', verifyToken, async (req, res) => {
   const { leaseId } = req.body;
   if (!leaseId) {
@@ -104,15 +104,23 @@ router.post('/claim', verifyToken, async (req, res) => {
     }
 
     const lease = leases[0];
+
+    // Check if this product has already been claimed
+    if (lease.is_claimed === 1 || lease.is_claimed === true) {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({ message: 'You have already claimed the reward for this product. Only one claim is allowed per lease.' });
+    }
+
     const dailyEarnings = parseFloat(lease.daily_income);
 
-    // Add daily income directly to withdrawable balance
+    // 1. Add daily income directly to withdrawable balance
     await connection.query('UPDATE users SET balance = balance + ? WHERE id = ?', [dailyEarnings, req.user.id]);
 
-    // Update last claim timestamp
-    await connection.query('UPDATE leases SET last_claim_time = NOW() WHERE id = ?', [leaseId]);
+    // 2. Mark this lease as claimed so it cannot be claimed again
+    await connection.query('UPDATE leases SET is_claimed = 1 WHERE id = ?', [leaseId]);
 
-    // Log transaction history for earnings claim
+    // 3. Log transaction history for earnings claim
     await connection.query(
       'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
       [req.user.id, 'earnings', `Daily Income Claim (${lease.plan_name})`, dailyEarnings, 'success']
