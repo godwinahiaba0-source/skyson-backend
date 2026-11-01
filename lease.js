@@ -85,7 +85,7 @@ router.post('/buy', verifyToken, async (req, res) => {
   }
 });
 
-// Claim Daily Income (Adds to withdrawable balance & logs earnings transaction)
+// Claim Daily Income (Adds instantly to withdrawable balance & logs earnings transaction)
 router.post('/claim', verifyToken, async (req, res) => {
   const { leaseId } = req.body;
   if (!leaseId) {
@@ -104,19 +104,9 @@ router.post('/claim', verifyToken, async (req, res) => {
     }
 
     const lease = leases[0];
-    const now = new Date();
-    const lastClaim = new Date(lease.last_claim_time);
-    const hoursSinceLastClaim = (now - lastClaim) / (1000 * 60 * 60);
-
-    if (hoursSinceLastClaim < 24) {
-      await connection.rollback();
-      connection.release();
-      return res.status(400).json({ message: 'You can only claim once every 24 hours.' });
-    }
-
     const dailyEarnings = parseFloat(lease.daily_income);
 
-    // Add daily income to withdrawable balance
+    // Add daily income directly to withdrawable balance
     await connection.query('UPDATE users SET balance = balance + ? WHERE id = ?', [dailyEarnings, req.user.id]);
 
     // Update last claim timestamp
