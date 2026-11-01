@@ -34,22 +34,24 @@ router.post('/register', async (req, res) => {
       [username, email, hashedPassword, generatedInviteCode]
     );
 
-    const newUserId = result.insertId;
+    const newUserId = result.insertId; // This is the user_id
 
     // If an invitation code was used during signup, register the Level 1 downline relationship
     if (inviteCode) {
       const [ancestorRows] = await connection.query(
-        'SELECT id FROM users WHERE invitation_code = ?',
+        'SELECT user_id FROM users WHERE invitation_code = ?',
         [inviteCode]
       );
 
       if (ancestorRows.length > 0) {
-        const ancestorId = ancestorRows[0].id;
+        const ancestorId = ancestorRows[0].user_id;
         
         await connection.query(
           'INSERT INTO team_referrals (ancestor_user_id, descendant_user_id, level) VALUES (?, ?, 1)',
           [ancestorId, newUserId]
-        ).catch(() => {});
+        ).catch((err) => {
+          console.error('Failed to insert team referral:', err.message);
+        });
       }
     }
 
@@ -78,7 +80,6 @@ router.post('/register', async (req, res) => {
 // Login
 router.post('/login', async (req, res) => {
   try {
-    console.log('LOGIN HIT WITH BODY:', req.body);
     const { username, password } = req.body;
     const identifier = username || req.body.email;
 
@@ -104,12 +105,12 @@ router.post('/login', async (req, res) => {
     // Ensure user has an invitation code
     let inviteCode = user.invitation_code;
     if (!inviteCode) {
-      inviteCode = `SKY${100000 + user.id}`;
-      await pool.query('UPDATE users SET invitation_code = ? WHERE id = ?', [inviteCode, user.id]);
+      inviteCode = `SKY${100000 + user.user_id}`;
+      await pool.query('UPDATE users SET invitation_code = ? WHERE user_id = ?', [inviteCode, user.user_id]);
     }
 
     const token = jwt.sign(
-      { id: user.id, username: user.username, email: user.email },
+      { id: user.user_id, username: user.username, email: user.email },
       process.env.JWT_SECRET || 'skyson_secure_super_secret_key_2026',
       { expiresIn: '7d' }
     );
@@ -118,7 +119,7 @@ router.post('/login', async (req, res) => {
       message: 'Login successful!',
       token,
       user: {
-        id: user.id,
+        id: user.user_id,
         username: user.username,
         email: user.email,
         balance: user.balance || 0,
