@@ -34,7 +34,13 @@ router.get('/profile', verifyToken, async (req, res) => {
       await pool.query('UPDATE users SET invitation_code = ? WHERE user_id = ?', [user.invitation_code, user.id]);
     }
     
-    res.json({ user });
+    // Send it explicitly under both keys so frontend catches it instantly
+    res.json({ 
+      user: {
+        ...user,
+        invitation_code: user.invitation_code
+      } 
+    });
   } catch (err) {
     console.error('CRITICAL PROFILE ERROR:', err);
     res.status(500).json({ message: 'Error fetching profile.', error: err.message });
