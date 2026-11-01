@@ -18,8 +18,9 @@ const verifyToken = (req, res, next) => {
 
 router.get('/profile', verifyToken, async (req, res) => {
   try {
+    // Removed 'phone' from query since it doesn't exist in the users table
     const [users] = await pool.query(
-      'SELECT id, username, email, phone, balance, created_at FROM users WHERE id = ?', 
+      'SELECT id, username, email, balance, created_at FROM users WHERE id = ?', 
       [req.user.id]
     );
     
