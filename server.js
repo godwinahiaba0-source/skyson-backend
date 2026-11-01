@@ -38,7 +38,8 @@ const userRoutes = require('./user');
 const leaseRoutes = require('./lease');
 const rechargeRoutes = require('./recharge');
 const walletRoutes = require('./wallet'); 
-const teamRoutes = require('./team'); // Added team report routes
+const teamRoutes = require('./team'); // Team report routes
+const adminRoutes = require('./admin'); // Admin panel routes
 
 // Mount routes
 app.use('/api/auth', authRoutes);
@@ -47,6 +48,7 @@ app.use('/api/lease', leaseRoutes);
 app.use('/api/recharge', rechargeRoutes);
 app.use('/api/bankcard', walletRoutes);
 app.use('/api', teamRoutes); // Mounts /api/team/report
+app.use('/api/admin', adminRoutes); // Mounts admin panel endpoints
 
 // ==========================================
 // 3. SERVER STARTUP
