@@ -38,10 +38,11 @@ const [result] = await connection.query(
     const newUserId = result.insertId;
 
     // If an invitation code was used, register the Level 1 downline relationship
+    // If an invitation code was used, register the Level 1 downline relationship
     if (inviteCode) {
       const [ancestorRows] = await connection.query(
-        'SELECT id FROM users WHERE referral_code = ? OR invitation_code = ?',
-        [inviteCode, inviteCode]
+        'SELECT id FROM users WHERE invitation_code = ?',
+        [inviteCode]
       );
 
       if (ancestorRows.length > 0) {
