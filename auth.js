@@ -5,25 +5,53 @@ const jwt = require('jsonwebtoken');
 const pool = require('./db');
 
 // Register
+// Register Route with Strict Invitation Code Requirement & Validation
 router.post('/register', async (req, res) => {
   const { username, email, password, invitationCode, invitation_code } = req.body;
-  const inviteCode = invitationCode || invitation_code;
+  const rawInviteCode = invitationCode || invitation_code;
 
   if (!username || !email || !password) {
     return res.status(400).json({ message: 'Username, email, and password are required.' });
   }
 
+  // 1. Strict check: Invitation code must be provided
+  if (!rawInviteCode || rawInviteCode.trim() === '') {
+    return res.status(400).json({ message: 'A valid invitation code is required to register.' });
+  }
+
+  const inviteCode = rawInviteCode.trim();
   const connection = await pool.getConnection();
+
   try {
     await connection.beginTransaction();
 
-    const [existing] = await connection.query('SELECT * FROM users WHERE username = ? OR email = ?', [username, email]);
+    // 2. Strict check: Verify invitation code exists and belongs to a user in the database
+    const [inviterRows] = await connection.query(
+      'SELECT id FROM users WHERE invitation_code = ?',
+      [inviteCode]
+    );
+
+    if (inviterRows.length === 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({ message: 'Invalid invitation code. Code does not exist.' });
+    }
+
+    const level1AncestorId = inviterRows[0].id;
+
+    // 3. Check for existing username or email
+    const [existing] = await connection.query(
+      'SELECT * FROM users WHERE username = ? OR email = ?',
+      [username, email]
+    );
+    
     if (existing.length > 0) {
       await connection.rollback();
       connection.release();
       return res.status(400).json({ message: 'Username or email already registered.' });
     }
 
+    // Hash password and generate new user's invitation code
     const hashedPassword = await bcrypt.hash(password, 10);
     const generatedInviteCode = `SKY${Math.floor(100000 + Math.random() * 900000)}`;
 
@@ -33,59 +61,38 @@ router.post('/register', async (req, res) => {
     );
 
     const newUserId = result.insertId;
-    console.log(`New user registered: ID ${newUserId}, Username: ${username}, Used Invite Code: ${inviteCode || 'None'}`);
 
-    // Process multi-level team referrals (Levels 1, 2, and 3)
-    if (inviteCode && inviteCode.trim() !== '') {
-      try {
-        // Query primary key 'id' from users table
-        const [directAncestorRows] = await connection.query(
-          'SELECT id FROM users WHERE invitation_code = ?',
-          [inviteCode.trim()]
+    // 4. Link Level 1 referral
+    await connection.query(
+      'INSERT INTO team_referrals (ancestor_user_id, descendant_user_id, level) VALUES (?, ?, 1)',
+      [level1AncestorId, newUserId]
+    );
+
+    // 5. Link Level 2 referral (if inviter has an ancestor)
+    const [level2Rows] = await connection.query(
+      'SELECT ancestor_user_id FROM team_referrals WHERE descendant_user_id = ? AND level = 1',
+      [level1AncestorId]
+    );
+
+    if (level2Rows.length > 0) {
+      const level2AncestorId = level2Rows[0].ancestor_user_id;
+      await connection.query(
+        'INSERT INTO team_referrals (ancestor_user_id, descendant_user_id, level) VALUES (?, ?, 2)',
+        [level2AncestorId, newUserId]
+      );
+
+      // 6. Link Level 3 referral (if level 2 has an ancestor)
+      const [level3Rows] = await connection.query(
+        'SELECT ancestor_user_id FROM team_referrals WHERE descendant_user_id = ? AND level = 1',
+        [level2AncestorId]
+      );
+
+      if (level3Rows.length > 0) {
+        const level3AncestorId = level3Rows[0].ancestor_user_id;
+        await connection.query(
+          'INSERT INTO team_referrals (ancestor_user_id, descendant_user_id, level) VALUES (?, ?, 3)',
+          [level3AncestorId, newUserId]
         );
-
-        if (directAncestorRows.length > 0) {
-          const level1AncestorId = directAncestorRows[0].id;
-
-          // 1. Level 1 relationship
-          await connection.query(
-            'INSERT INTO team_referrals (ancestor_user_id, descendant_user_id, level) VALUES (?, ?, 1)',
-            [level1AncestorId, newUserId]
-          );
-          console.log(`Linked Level 1: Descendant ${newUserId} -> Ancestor ${level1AncestorId}`);
-
-          // 2. Level 2 relationship
-          const [level2Rows] = await connection.query(
-            'SELECT ancestor_user_id FROM team_referrals WHERE descendant_user_id = ? AND level = 1',
-            [level1AncestorId]
-          );
-
-          if (level2Rows.length > 0) {
-            const level2AncestorId = level2Rows[0].ancestor_user_id;
-            await connection.query(
-              'INSERT INTO team_referrals (ancestor_user_id, descendant_user_id, level) VALUES (?, ?, 2)',
-              [level2AncestorId, newUserId]
-            );
-
-            // 3. Level 3 relationship
-            const [level3Rows] = await connection.query(
-              'SELECT ancestor_user_id FROM team_referrals WHERE descendant_user_id = ? AND level = 1',
-              [level2AncestorId]
-            );
-
-            if (level3Rows.length > 0) {
-              const level3AncestorId = level3Rows[0].ancestor_user_id;
-              await connection.query(
-                'INSERT INTO team_referrals (ancestor_user_id, descendant_user_id, level) VALUES (?, ?, 3)',
-                [level3AncestorId, newUserId]
-              );
-            }
-          }
-        } else {
-          console.warn(`Warning: Invitation code ${inviteCode} was not found in users table.`);
-        }
-      } catch (refErr) {
-        console.error('Non-fatal referral processing error:', refErr.message);
       }
     }
 
