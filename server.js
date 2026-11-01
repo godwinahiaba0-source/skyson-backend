@@ -37,12 +37,14 @@ const authRoutes = require('./auth');
 const userRoutes = require('./user');
 const leaseRoutes = require('./lease');
 const rechargeRoutes = require('./recharge');
+const walletRoutes = require('./wallet'); // Added wallet/bankcard routes
 
 // Mount routes
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/lease', leaseRoutes);
 app.use('/api/recharge', rechargeRoutes);
+app.use('/api/bankcard', walletRoutes); // Mounted to match your bankcard.html fetch requests
 
 // ==========================================
 // 3. SERVER STARTUP
