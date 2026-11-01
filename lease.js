@@ -16,7 +16,7 @@ const verifyToken = (req, res, next) => {
   });
 };
 
-// Buy Lease (Deducts strictly from deposit_balance)
+// Buy Lease (Deducts strictly from deposit_balance & prevents duplicate purchases)
 router.post('/buy', verifyToken, async (req, res) => {
   const { plan_name, price, daily_income, duration } = req.body;
   if (!plan_name || !price || !daily_income || !duration) {
@@ -26,6 +26,18 @@ router.post('/buy', verifyToken, async (req, res) => {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
+
+    // Check if user already owns this exact plan
+    const [existingLease] = await connection.query(
+      'SELECT id FROM leases WHERE user_id = ? AND plan_name = ?',
+      [req.user.id, plan_name]
+    );
+
+    if (existingLease.length > 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({ message: `You have already leased ${plan_name}. Each plan can only be purchased once.` });
+    }
 
     // Check user's deposit_balance (lease-only funds)
     const [users] = await connection.query('SELECT deposit_balance FROM users WHERE id = ? FOR UPDATE', [req.user.id]);
