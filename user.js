@@ -53,7 +53,7 @@ router.get('/profile', verifyToken, async (req, res) => {
     
     let user = users[0];
 
-    // Auto-generate invitation_code if missing in database
+    // Auto-generate if missing in database
     if (!user.invitation_code) {
       user.invitation_code = `SKY${100000 + user.id}`;
       await pool.query('UPDATE users SET invitation_code = ? WHERE id = ?', [user.invitation_code, user.id]);
