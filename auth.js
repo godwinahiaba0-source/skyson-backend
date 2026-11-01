@@ -26,19 +26,17 @@ router.post('/register', async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
     
-    // Generate a unique referral code for the new user (e.g., SKY + random 6 digits)
-    // Inside /register
-const invitationCode = `SKY${Math.floor(100000 + Math.random() * 900000)}`;
+    // Generate a unique invitation code for the new user
+    const generatedInviteCode = `SKY${Math.floor(100000 + Math.random() * 900000)}`;
 
-const [result] = await connection.query(
-  'INSERT INTO users (username, email, password, invitation_code) VALUES (?, ?, ?, ?)',
-  [username, email, hashedPassword, invitationCode]
-);
+    const [result] = await connection.query(
+      'INSERT INTO users (username, email, password, invitation_code) VALUES (?, ?, ?, ?)',
+      [username, email, hashedPassword, generatedInviteCode]
+    );
 
     const newUserId = result.insertId;
 
-    // If an invitation code was used, register the Level 1 downline relationship
-    // If an invitation code was used, register the Level 1 downline relationship
+    // If an invitation code was used during signup, register the Level 1 downline relationship
     if (inviteCode) {
       const [ancestorRows] = await connection.query(
         'SELECT id FROM users WHERE invitation_code = ?',
@@ -48,7 +46,6 @@ const [result] = await connection.query(
       if (ancestorRows.length > 0) {
         const ancestorId = ancestorRows[0].id;
         
-        // Insert Level 1 team referral relationship
         await connection.query(
           'INSERT INTO team_referrals (ancestor_user_id, descendant_user_id, level) VALUES (?, ?, 1)',
           [ancestorId, newUserId]
@@ -68,7 +65,7 @@ const [result] = await connection.query(
     res.status(201).json({
       message: 'User registered successfully!',
       token,
-      user: { id: newUserId, username, email, referral_code: referralCode }
+      user: { id: newUserId, username, email, invitation_code: generatedInviteCode }
     });
   } catch (err) {
     await connection.rollback();
@@ -78,7 +75,6 @@ const [result] = await connection.query(
   }
 });
 
-// Login
 // Login
 router.post('/login', async (req, res) => {
   try {
@@ -112,7 +108,6 @@ router.post('/login', async (req, res) => {
       await pool.query('UPDATE users SET invitation_code = ? WHERE id = ?', [inviteCode, user.id]);
     }
 
-    // Properly declare the token variable here
     const token = jwt.sign(
       { id: user.id, username: user.username, email: user.email },
       process.env.JWT_SECRET || 'skyson_secure_super_secret_key_2026',
