@@ -104,9 +104,11 @@ router.get('/team/report', verifyToken, async (req, res) => {
   }
 });
 
-// Shared handler for fetching team members
+// Shared handler for fetching team members with debugging logs
 const handleFetchTeamMembers = async (req, res) => {
   try {
+    console.log(`[TEAM DEBUG] Fetching team members for logged-in User ID: ${req.user.id}`);
+
     const [members] = await pool.query(`
       SELECT 
         u.id as user_id, 
@@ -121,6 +123,7 @@ const handleFetchTeamMembers = async (req, res) => {
       ORDER BY tr.level ASC, u.created_at DESC
     `, [req.user.id]);
 
+    console.log(`[TEAM DEBUG] Found ${members.length} downline members for User ID ${req.user.id}`);
     res.json({ success: true, members });
   } catch (err) {
     console.error('Fetch team members error:', err);
