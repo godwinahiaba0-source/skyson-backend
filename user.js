@@ -51,12 +51,12 @@ router.get('/profile', verifyToken, async (req, res) => {
   }
 });
 
-// Dashboard Route (Live data for account & home stats)
+// Dashboard Route (Live dynamic tracking for Today's, Yesterday's, Total Deposits & Balance)
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Get user withdrawable balance and lease-only deposit balance
+    // 1. Fetch user withdrawable balance and lease-only deposit balance
     const [users] = await pool.query(
       'SELECT balance, deposit_balance FROM users WHERE id = ?', 
       [userId]
@@ -65,21 +65,41 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     if (users.length === 0) return res.status(404).json({ message: 'User not found.' });
     const user = users[0];
 
-    // Query active leases count and total daily income sum across all active leases
+    // 2. Count active leases
     const [leaseStats] = await pool.query(
-      'SELECT COUNT(*) as active_leases, COALESCE(SUM(daily_income), 0) as total_daily_earnings FROM leases WHERE user_id = ?',
+      'SELECT COUNT(*) as active_leases FROM leases WHERE user_id = ?',
       [userId]
     );
+
+    // 3. Today's Earnings (Sum of earnings claimed TODAY from transactions)
+    const [todayRows] = await pool.query(`
+      SELECT COALESCE(SUM(amount), 0) as today_earnings 
+      FROM transactions 
+      WHERE user_id = ? AND type = 'earnings' AND DATE(created_at) = CURDATE()
+    `, [userId]);
+
+    // 4. Yesterday's Earnings (Sum of earnings claimed YESTERDAY from transactions)
+    const [yesterdayRows] = await pool.query(`
+      SELECT COALESCE(SUM(amount), 0) as yesterday_earnings 
+      FROM transactions 
+      WHERE user_id = ? AND type = 'earnings' AND DATE(created_at) = CURDATE() - INTERVAL 1 DAY
+    `, [userId]);
+
+    // 5. Total Approved Deposits Accumulation
+    const [depositRows] = await pool.query(`
+      SELECT COALESCE(SUM(amount), 0) as total_approved_deposits 
+      FROM recharges 
+      WHERE user_id = ? AND (status = 'approved' OR status = 'success')
+    `, [userId]);
 
     res.json({
       success: true,
       balance: parseFloat(user.balance || 0), // Withdrawable balance
       deposit_balance: parseFloat(user.deposit_balance || 0),
-      totalDeposit: parseFloat(user.deposit_balance || 0),
+      totalDeposit: parseFloat(depositRows[0].total_approved_deposits || 0), // Accumulated approved deposits
       activeLeases: leaseStats[0].active_leases || 0,
-      totalEarnings: parseFloat(leaseStats[0].total_daily_earnings || 0),
-      todayEarnings: parseFloat(leaseStats[0].total_daily_earnings || 0), // Total daily generation to claim
-      yesterdayEarnings: 0.00
+      todayEarnings: parseFloat(todayRows[0].today_earnings || 0), // Earnings claimed today
+      yesterdayEarnings: parseFloat(yesterdayRows[0].yesterday_earnings || 0) // Earnings claimed yesterday
     });
   } catch (err) {
     console.error('Dashboard stats error:', err);
