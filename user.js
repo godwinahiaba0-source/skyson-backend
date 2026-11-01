@@ -16,11 +16,11 @@ const verifyToken = (req, res, next) => {
   });
 };
 
-// GET Profile
+// GET Profile & Dashboard Statistics
 router.get('/profile', verifyToken, async (req, res) => {
   try {
     const [users] = await pool.query(
-      'SELECT id, username, email, balance, invitation_code, created_at FROM users WHERE id = ?', 
+      'SELECT id, username, email, balance, deposit_balance, invitation_code, created_at FROM users WHERE id = ?', 
       [req.user.id]
     );
     
@@ -35,14 +35,46 @@ router.get('/profile', verifyToken, async (req, res) => {
     }
     
     res.json({ 
+      success: true,
       user: {
-        ...user,
-        invitation_code: user.invitation_code
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        balance: parseFloat(user.balance || 0).toFixed(2),
+        deposit_balance: parseFloat(user.deposit_balance || 0).toFixed(2),
+        invitation_code: user.invitation_code,
+        created_at: user.created_at
       } 
     });
   } catch (err) {
     console.error('CRITICAL PROFILE ERROR:', err);
     res.status(500).json({ message: 'Error fetching profile.', error: err.message });
+  }
+});
+
+// Dashboard Route (used by homepage stats)
+router.get('/dashboard', verifyToken, async (req, res) => {
+  try {
+    const [users] = await pool.query(
+      'SELECT balance, deposit_balance FROM users WHERE id = ?', 
+      [req.user.id]
+    );
+    
+    if (users.length === 0) return res.status(404).json({ message: 'User not found.' });
+    
+    const user = users[0];
+    
+    res.json({
+      success: true,
+      balance: parseFloat(user.balance || 0),
+      deposit_balance: parseFloat(user.deposit_balance || 0),
+      totalDeposit: parseFloat(user.deposit_balance || 0),
+      todayEarnings: 0.00,
+      yesterdayEarnings: 0.00
+    });
+  } catch (err) {
+    console.error('Dashboard stats error:', err);
+    res.status(500).json({ message: 'Error fetching dashboard stats.' });
   }
 });
 
@@ -131,7 +163,6 @@ const handleFetchTeamMembers = async (req, res) => {
   }
 };
 
-// Register both paths to prevent 404 routing mismatches
 router.get('/team/members', verifyToken, handleFetchTeamMembers);
 router.get('/user/team/members', verifyToken, handleFetchTeamMembers);
 
