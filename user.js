@@ -28,7 +28,6 @@ router.get('/profile', verifyToken, async (req, res) => {
     
     let user = users[0];
 
-    // Auto-generate invitation_code if missing
     if (!user.invitation_code) {
       user.invitation_code = `SKY${100000 + user.id}`;
       await pool.query('UPDATE users SET invitation_code = ? WHERE id = ?', [user.invitation_code, user.id]);
@@ -52,24 +51,33 @@ router.get('/profile', verifyToken, async (req, res) => {
   }
 });
 
-// Dashboard Route (used by homepage stats)
+// Dashboard Route (Live data for account & home stats)
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
+    const userId = req.user.id;
+
     const [users] = await pool.query(
       'SELECT balance, deposit_balance FROM users WHERE id = ?', 
-      [req.user.id]
+      [userId]
     );
     
     if (users.length === 0) return res.status(404).json({ message: 'User not found.' });
-    
     const user = users[0];
-    
+
+    // Query active leases count and total daily income sum across all active leases
+    const [leaseStats] = await pool.query(
+      'SELECT COUNT(*) as active_leases, COALESCE(SUM(daily_income), 0) as total_daily_earnings FROM leases WHERE user_id = ?',
+      [userId]
+    );
+
     res.json({
       success: true,
       balance: parseFloat(user.balance || 0),
       deposit_balance: parseFloat(user.deposit_balance || 0),
       totalDeposit: parseFloat(user.deposit_balance || 0),
-      todayEarnings: 0.00,
+      activeLeases: leaseStats[0].active_leases || 0,
+      totalEarnings: parseFloat(leaseStats[0].total_daily_earnings || 0),
+      todayEarnings: parseFloat(leaseStats[0].total_daily_earnings || 0),
       yesterdayEarnings: 0.00
     });
   } catch (err) {
