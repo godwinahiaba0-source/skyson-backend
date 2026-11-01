@@ -78,6 +78,7 @@ const [result] = await connection.query(
 });
 
 // Login
+// Login
 router.post('/login', async (req, res) => {
   try {
     console.log('LOGIN HIT WITH BODY:', req.body);
@@ -103,24 +104,31 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'Invalid username or password.' });
     }
 
-    // Ensure user has a referral code on login if missing
+    // Ensure user has an invitation code
     let inviteCode = user.invitation_code;
-if (!inviteCode) {
-  inviteCode = `SKY${100000 + user.id}`;
-  await pool.query('UPDATE users SET invitation_code = ? WHERE id = ?', [inviteCode, user.id]);
-}
+    if (!inviteCode) {
+      inviteCode = `SKY${100000 + user.id}`;
+      await pool.query('UPDATE users SET invitation_code = ? WHERE id = ?', [inviteCode, user.id]);
+    }
 
-res.json({
-  message: 'Login successful!',
-  token,
-  user: {
-    id: user.id,
-    username: user.username,
-    email: user.email,
-    balance: user.balance || 0,
-    invitation_code: inviteCode
-  }
-});
+    // Properly declare the token variable here
+    const token = jwt.sign(
+      { id: user.id, username: user.username, email: user.email },
+      process.env.JWT_SECRET || 'skyson_secure_super_secret_key_2026',
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      message: 'Login successful!',
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        balance: user.balance || 0,
+        invitation_code: inviteCode
+      }
+    });
   } catch (err) {
     console.error('CRITICAL LOGIN ERROR:', err);
     res.status(500).json({ message: 'Server error during login.', error: err.message });
