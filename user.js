@@ -72,12 +72,12 @@ router.get('/dashboard', verifyToken, async (req, res) => {
 
     res.json({
       success: true,
-      balance: parseFloat(user.balance || 0),
+      balance: parseFloat(user.balance || 0), // Withdrawable wallet balance
       deposit_balance: parseFloat(user.deposit_balance || 0),
       totalDeposit: parseFloat(user.deposit_balance || 0),
       activeLeases: leaseStats[0].active_leases || 0,
       totalEarnings: parseFloat(leaseStats[0].total_daily_earnings || 0),
-      todayEarnings: parseFloat(leaseStats[0].total_daily_earnings || 0),
+      todayEarnings: parseFloat(leaseStats[0].total_daily_earnings || 0), // Total daily generation earnings to claim
       yesterdayEarnings: 0.00
     });
   } catch (err) {
