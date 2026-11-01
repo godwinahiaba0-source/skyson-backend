@@ -63,6 +63,50 @@ router.post('/profile', verifyToken, async (req, res) => {
   }
 });
 
+// GET Team Report Statistics
+router.get('/team/report', verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Get total team size
+    const [teamSizeRows] = await pool.query(
+      'SELECT COUNT(*) as count FROM team_referrals WHERE ancestor_user_id = ?',
+      [userId]
+    );
+    const teamSize = teamSizeRows[0].count || 0;
+
+    // Get team recharge total
+    const [rechargeRows] = await pool.query(`
+      SELECT COALESCE(SUM(d.amount), 0) as total_recharge 
+      FROM deposits d
+      JOIN team_referrals tr ON d.user_id = tr.descendant_user_id
+      WHERE tr.ancestor_user_id = ? AND d.status = 'approved'
+    `, [userId]);
+    const teamRecharge = rechargeRows[0].total_recharge || 0;
+
+    // Get team withdraw total
+    const [withdrawRows] = await pool.query(`
+      SELECT COALESCE(SUM(w.amount), 0) as total_withdraw 
+      FROM withdrawals w
+      JOIN team_referrals tr ON w.user_id = tr.descendant_user_id
+      WHERE tr.ancestor_user_id = ? AND w.status = 'approved'
+    `, [userId]);
+    const teamWithdraw = withdrawRows[0].total_withdraw || 0;
+
+    res.json({
+      teamRecharge,
+      teamWithdraw,
+      teamSize,
+      firstChargeCount: 0,
+      firstPushCount: 0,
+      newTeamCount: teamSize
+    });
+  } catch (err) {
+    console.error('Fetch team report error:', err);
+    res.status(500).json({ message: 'Error fetching team report.' });
+  }
+});
+
 // Get user's team members / referrals by level
 router.get('/user/team/members', verifyToken, async (req, res) => {
   try {
@@ -83,7 +127,7 @@ router.get('/user/team/members', verifyToken, async (req, res) => {
     res.json({ success: true, members });
   } catch (err) {
     console.error('Fetch team members error:', err);
-    res.status(500).json({ success: false, message: 'Failed to fetch team members.' });
+    res.status(500).json({ message: 'Failed to fetch team members.' });
   }
 });
 
