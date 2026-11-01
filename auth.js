@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const pool = require('./db');
 
 // Register
+// Register
 router.post('/register', async (req, res) => {
   const { username, email, password, invitationCode, invitation_code } = req.body;
   const inviteCode = invitationCode || invitation_code;
@@ -25,8 +26,6 @@ router.post('/register', async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    
-    // Generate a unique invitation code for the new user
     const generatedInviteCode = `SKY${Math.floor(100000 + Math.random() * 900000)}`;
 
     const [result] = await connection.query(
@@ -34,24 +33,27 @@ router.post('/register', async (req, res) => {
       [username, email, hashedPassword, generatedInviteCode]
     );
 
-    const newUserId = result.insertId; // This is the user_id
+    const newUserId = result.insertId;
+    console.log(`New user registered: ID ${newUserId}, Username: ${username}, Used Invite Code: ${inviteCode || 'None'}`);
 
-    // If an invitation code was used during signup, register the Level 1 downline relationship
+    // If an invitation code was used during signup, link them in team_referrals
     if (inviteCode) {
       const [ancestorRows] = await connection.query(
         'SELECT user_id FROM users WHERE invitation_code = ?',
-        [inviteCode]
+        [inviteCode.trim()]
       );
 
       if (ancestorRows.length > 0) {
         const ancestorId = ancestorRows[0].user_id;
-        
+        console.log(`Found upline ancestor ID ${ancestorId} for invite code ${inviteCode}`);
+
+        // Insert Level 1 relationship
         await connection.query(
           'INSERT INTO team_referrals (ancestor_user_id, descendant_user_id, level) VALUES (?, ?, 1)',
           [ancestorId, newUserId]
-        ).catch((err) => {
-          console.error('Failed to insert team referral:', err.message);
-        });
+        );
+      } else {
+        console.warn(`Warning: Invitation code ${inviteCode} provided during registration was not found in users table.`);
       }
     }
 
