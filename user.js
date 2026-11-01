@@ -52,10 +52,12 @@ router.get('/profile', verifyToken, async (req, res) => {
 });
 
 // Dashboard Route (Live data for account & home stats)
+// Dashboard Route (Live data for account & home stats)
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
 
+    // Get user withdrawable balance and lease-only deposit balance
     const [users] = await pool.query(
       'SELECT balance, deposit_balance FROM users WHERE id = ?', 
       [userId]
@@ -72,12 +74,12 @@ router.get('/dashboard', verifyToken, async (req, res) => {
 
     res.json({
       success: true,
-      balance: parseFloat(user.balance || 0), // Withdrawable wallet balance
+      balance: parseFloat(user.balance || 0), // Withdrawable balance
       deposit_balance: parseFloat(user.deposit_balance || 0),
       totalDeposit: parseFloat(user.deposit_balance || 0),
       activeLeases: leaseStats[0].active_leases || 0,
       totalEarnings: parseFloat(leaseStats[0].total_daily_earnings || 0),
-      todayEarnings: parseFloat(leaseStats[0].total_daily_earnings || 0), // Total daily generation earnings to claim
+      todayEarnings: parseFloat(leaseStats[0].total_daily_earnings || 0), // Total daily generation to claim
       yesterdayEarnings: 0.00
     });
   } catch (err) {
