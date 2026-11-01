@@ -87,14 +87,42 @@ router.get('/dashboard', verifyToken, async (req, res) => {
   }
 });
 
-// GET User Transactions (Fetches activity history from database)
+// GET User Transactions (Aggregates from transactions, recharges, withdrawals, and leases)
 router.get('/transactions', verifyToken, async (req, res) => {
   try {
-    const [records] = await pool.query(
-      'SELECT id, type, description, amount, status, created_at as date FROM transactions WHERE user_id = ? ORDER BY created_at DESC',
-      [req.user.id]
+    const userId = req.user.id;
+
+    // 1. Fetch from explicit transactions table
+    const [txRecords] = await pool.query(
+      'SELECT id, type, description, amount, status, created_at as date FROM transactions WHERE user_id = ?',
+      [userId]
     );
-    res.json({ success: true, records });
+
+    // 2. Fetch recharges
+    const [recharges] = await pool.query(
+      'SELECT id, "recharge" as type, CONCAT("Recharge via ", COALESCE(payment_method, "Mobile Money")) as description, amount, status, created_at as date FROM recharges WHERE user_id = ?',
+      [userId]
+    );
+
+    // 3. Fetch withdrawals
+    const [withdrawals] = await pool.query(
+      'SELECT id, "withdraw" as type, CONCAT("Withdrawal to ", COALESCE(account_number, "Bank")) as description, amount, status, created_at as date FROM withdrawals WHERE user_id = ?',
+      [userId]
+    );
+
+    // 4. Fetch lease purchases
+    const [leases] = await pool.query(
+      'SELECT id, "recharge" as type, CONCAT("Leased ", plan_name) as description, price as amount, "success" as status, created_at as date FROM leases WHERE user_id = ?',
+      [userId]
+    );
+
+    // Combine all arrays together
+    let allRecords = [...txRecords, ...recharges, ...withdrawals, ...leases];
+
+    // Sort by date descending (newest first)
+    allRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    res.json({ success: true, records: allRecords });
   } catch (err) {
     console.error('Fetch transactions error:', err);
     res.status(500).json({ success: false, message: 'Failed to fetch transactions.', records: [] });
