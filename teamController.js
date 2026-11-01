@@ -1,12 +1,13 @@
 // ==========================================
 // TEAM REPORT & METRICS CONTROLLER
 // ==========================================
+const pool = require('./db');
 
-const getTeamReport = async (req, res, pool) => {
+const getTeamReport = async (req, res) => {
     const userId = req.user.id;
 
     try {
-        // Fetch all downlines categorized by level directly from the team_referrals table[cite: 17]
+        // Fetch all downlines categorized by level directly from the team_referrals table
         const [referralRows] = await pool.query(
             `SELECT descendant_user_id, level FROM team_referrals WHERE ancestor_user_id = ? AND level IN (1, 2, 3)`,
             [userId]
@@ -41,7 +42,7 @@ const getTeamReport = async (req, res, pool) => {
             if (ids && ids.length > 0) {
                 const placeholders = ids.map(() => '?').join(',');
                 
-                // Calculate total approved recharges for this specific level from the deposits table[cite: 17]
+                // Calculate total approved recharges for this specific level from the deposits table
                 const [rechargeRows] = await pool.query(
                     `SELECT COALESCE(SUM(amount), 0) as total_recharge, COUNT(DISTINCT user_id) as recharge_count 
                      FROM deposits 
