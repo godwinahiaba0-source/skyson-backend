@@ -16,7 +16,7 @@ const verifyToken = (req, res, next) => {
   });
 };
 
-// Buy Lease (Deducts strictly from deposit_balance & sets last_claim_time to NULL)
+// Buy Lease (Deducts strictly from deposit_balance & logs transaction)
 router.post('/buy', verifyToken, async (req, res) => {
   const { plan_name, price, daily_income, duration } = req.body;
   if (!plan_name || !price || !daily_income || !duration) {
@@ -61,7 +61,7 @@ router.post('/buy', verifyToken, async (req, res) => {
     // Deduct from deposit_balance
     await connection.query('UPDATE users SET deposit_balance = deposit_balance - ? WHERE id = ?', [planPrice, req.user.id]);
     
-    // Create active lease record with last_claim_time set to NULL (unclaimed state)
+    // Create active lease record with last_claim_time set to NULL so they can claim immediately upon purchase
     await connection.query(
       'INSERT INTO leases (user_id, plan_name, price, daily_income, duration, last_claim_time) VALUES (?, ?, ?, ?, ?, NULL)',
       [req.user.id, plan_name, planPrice, daily_income, duration]
@@ -85,7 +85,7 @@ router.post('/buy', verifyToken, async (req, res) => {
   }
 });
 
-// Claim Daily Income (Strictly 1 claim allowed per product lease)
+// Claim Daily Income (Enforces 24-hour cooldown between claims)
 router.post('/claim', verifyToken, async (req, res) => {
   const { leaseId } = req.body;
   if (!leaseId) {
@@ -105,11 +105,17 @@ router.post('/claim', verifyToken, async (req, res) => {
 
     const lease = leases[0];
 
-    // Check if this product has already been claimed (if last_claim_time is NOT NULL)
+    // Check 24-hour cooldown if last_claim_time is already set
     if (lease.last_claim_time !== null) {
-      await connection.rollback();
-      connection.release();
-      return res.status(400).json({ message: 'You have already claimed the income for this product. Only one claim is allowed per lease.' });
+      const now = new Date();
+      const lastClaim = new Date(lease.last_claim_time);
+      const hoursSinceLastClaim = (now - lastClaim) / (1000 * 60 * 60);
+
+      if (hoursSinceLastClaim < 24) {
+        await connection.rollback();
+        connection.release();
+        return res.status(400).json({ message: 'You can only claim once every 24 hours.' });
+      }
     }
 
     const dailyEarnings = parseFloat(lease.daily_income);
@@ -117,7 +123,7 @@ router.post('/claim', verifyToken, async (req, res) => {
     // 1. Add daily income directly to withdrawable balance
     await connection.query('UPDATE users SET balance = balance + ? WHERE id = ?', [dailyEarnings, req.user.id]);
 
-    // 2. Mark as claimed by setting last_claim_time timestamp
+    // 2. Update last claim timestamp to NOW() to start the 24-hour timer
     await connection.query('UPDATE leases SET last_claim_time = NOW() WHERE id = ?', [leaseId]);
 
     // 3. Log transaction history for earnings claim
