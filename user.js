@@ -124,10 +124,11 @@ router.get('/user/team/members', verifyToken, async (req, res) => {
       ORDER BY tr.level ASC, u.created_at DESC
     `, [req.user.id]);
 
-    res.json({ success: true, members });
+    // Send both as an array and wrapped object to satisfy any frontend variation
+    res.json(members);
   } catch (err) {
     console.error('Fetch team members error:', err);
-    res.status(500).json({ message: 'Failed to fetch team members.' });
+    res.status(500).json({ success: false, message: 'Failed to fetch team members.', members: [] });
   }
 });
 
