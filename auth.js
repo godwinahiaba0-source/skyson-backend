@@ -27,12 +27,13 @@ router.post('/register', async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     
     // Generate a unique referral code for the new user (e.g., SKY + random 6 digits)
-    const referralCode = `SKY${Math.floor(100000 + Math.random() * 900000)}`;
+    // Inside /register
+const invitationCode = `SKY${Math.floor(100000 + Math.random() * 900000)}`;
 
-    const [result] = await connection.query(
-      'INSERT INTO users (username, email, password, referral_code, invitation_code) VALUES (?, ?, ?, ?, ?)',
-      [username, email, hashedPassword, referralCode, inviteCode || null]
-    );
+const [result] = await connection.query(
+  'INSERT INTO users (username, email, password, invitation_code) VALUES (?, ?, ?, ?)',
+  [username, email, hashedPassword, invitationCode]
+);
 
     const newUserId = result.insertId;
 
@@ -103,29 +104,23 @@ router.post('/login', async (req, res) => {
     }
 
     // Ensure user has a referral code on login if missing
-    let refCode = user.referral_code;
-    if (!refCode) {
-      refCode = `SKY${100000 + user.id}`;
-      await pool.query('UPDATE users SET referral_code = ? WHERE id = ?', [refCode, user.id]);
-    }
+    let inviteCode = user.invitation_code;
+if (!inviteCode) {
+  inviteCode = `SKY${100000 + user.id}`;
+  await pool.query('UPDATE users SET invitation_code = ? WHERE id = ?', [inviteCode, user.id]);
+}
 
-    const token = jwt.sign(
-      { id: user.id, username: user.username, email: user.email },
-      process.env.JWT_SECRET || 'skyson_secure_super_secret_key_2026',
-      { expiresIn: '7d' }
-    );
-
-    res.json({
-      message: 'Login successful!',
-      token,
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        balance: user.balance || 0,
-        referral_code: refCode
-      }
-    });
+res.json({
+  message: 'Login successful!',
+  token,
+  user: {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    balance: user.balance || 0,
+    invitation_code: inviteCode
+  }
+});
   } catch (err) {
     console.error('CRITICAL LOGIN ERROR:', err);
     res.status(500).json({ message: 'Server error during login.', error: err.message });
