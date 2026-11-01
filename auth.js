@@ -47,15 +47,15 @@ router.post('/login', async (req, res) => {
   try {
     console.log('LOGIN HIT WITH BODY:', req.body);
     const { username, password } = req.body;
-    const identifier = username || req.body.email || req.body.phone;
+    const identifier = username || req.body.email;
 
     if (!identifier || !password) {
       return res.status(400).json({ message: 'Username/Email and password are required.' });
     }
 
     const [users] = await pool.query(
-      'SELECT * FROM users WHERE username = ? OR email = ? OR phone = ?',
-      [identifier, identifier, identifier]
+      'SELECT * FROM users WHERE username = ? OR email = ?',
+      [identifier, identifier]
     );
 
     if (users.length === 0) {
