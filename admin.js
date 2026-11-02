@@ -81,7 +81,7 @@ router.get('/stats', verifyAdmin, async (req, res) => {
   }
 });
 
-// GET All Users with safe column checking
+// GET All Users with safe column checking & inviter username resolution
 router.get('/users', verifyAdmin, async (req, res) => {
   try {
     const [users] = await pool.query(`
@@ -129,7 +129,7 @@ router.post('/users/action', verifyAdmin, async (req, res) => {
   }
 });
 
-// POST Reset Bound Payment Account (Bank Card)
+// POST Reset Bound Payment Account (Bank Card) via username or user ID
 router.post('/bankcard/reset', verifyAdmin, async (req, res) => {
   const { userId, username } = req.body;
   try {
@@ -151,7 +151,6 @@ router.post('/bankcard/reset', verifyAdmin, async (req, res) => {
   }
 });
 
-// GET User Downline Referral Tree
 // GET User Downline Referral Tree using team_referrals table
 router.get('/users/:id/referrals', verifyAdmin, async (req, res) => {
   const userId = req.params.id;
