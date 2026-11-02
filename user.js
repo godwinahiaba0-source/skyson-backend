@@ -290,4 +290,71 @@ const handleFetchTeamMembers = async (req, res) => {
 router.get('/team/members', verifyToken, handleFetchTeamMembers);
 router.get('/user/team/members', verifyToken, handleFetchTeamMembers);
 
+// POST Claim Bonus Code
+router.post('/claim-bonus', verifyToken, async (req, res) => {
+  const { code } = req.body;
+  const userId = req.user.id;
+
+  if (!code || !code.trim()) {
+    return res.status(400).json({ success: false, message: 'Please enter a valid bonus code.' });
+  }
+
+  const cleanCode = code.trim().toUpperCase();
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    // 1. Check if bonus code exists and lock row
+    const [codes] = await connection.query(
+      'SELECT * FROM bonus_codes WHERE code = ? FOR UPDATE',
+      [cleanCode]
+    );
+
+    if (codes.length === 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(404).json({ success: false, message: 'Invalid bonus code.' });
+    }
+
+    const bonus = codes[0];
+
+    // 2. Ensure single-use enforcement
+    if (bonus.status === 'claimed') {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({ success: false, message: 'This bonus code has already been claimed.' });
+    }
+
+    const bonusAmount = parseFloat(bonus.amount);
+
+    // 3. Mark code as claimed
+    await connection.query(
+      'UPDATE bonus_codes SET status = "claimed", claimed_by = ?, claimed_at = NOW() WHERE id = ?',
+      [userId, bonus.id]
+    );
+
+    // 4. Credit user's withdrawable balance
+    await connection.query(
+      'UPDATE users SET balance = balance + ? WHERE id = ?',
+      [bonusAmount, userId]
+    );
+
+    // 5. Log in transaction history (shows up green as an earning)
+    await connection.query(
+      `INSERT INTO transactions (user_id, type, description, amount, status, created_at) VALUES (?, 'earnings', ?, ?, 'success', NOW())`,
+      [userId, `Bonus Code Claimed (${cleanCode})`, bonusAmount]
+    );
+
+    await connection.commit();
+    connection.release();
+
+    res.json({ success: true, message: `Successfully claimed GH₵ ${bonusAmount.toFixed(2)} bonus!` });
+  } catch (err) {
+    await connection.rollback();
+    connection.release();
+    console.error('Claim bonus error:', err);
+    res.status(500).json({ success: false, message: 'Server error processing bonus claim.' });
+  }
+});
 module.exports = router;
