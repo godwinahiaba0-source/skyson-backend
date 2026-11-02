@@ -82,6 +82,7 @@ router.get('/stats', verifyAdmin, async (req, res) => {
 });
 
 // GET All Users with safe column checking & inviter username resolution
+// GET All Users with referral inviter resolved via team_referrals table
 router.get('/users', verifyAdmin, async (req, res) => {
   try {
     const [users] = await pool.query(`
@@ -90,15 +91,16 @@ router.get('/users', verifyAdmin, async (req, res) => {
              COALESCE(u.is_deleted, 0) as is_deleted, 
              COALESCE(u.can_withdraw, 1) as can_withdraw, 
              u.created_at,
-             ref.username as invited_by_username
+             COALESCE(ref.username, 'Direct / None') as invited_by_username
       FROM users u
-      LEFT JOIN users ref ON u.invited_by = ref.id
+      LEFT JOIN team_referrals tr ON u.id = tr.descendant_user_id AND tr.level = 1
+      LEFT JOIN users ref ON tr.ancestor_user_id = ref.id
       ORDER BY u.created_at DESC
     `);
     res.json({ success: true, users });
   } catch (err) {
     console.error('Admin users fetch error:', err);
-    res.status(500).json({ success: false, message: 'Failed to fetch users.' });
+    res.status(500).json({ success: false, message: 'Failed to fetch users.', error: err.message });
   }
 });
 
