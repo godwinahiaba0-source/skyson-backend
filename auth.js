@@ -141,7 +141,7 @@ router.post('/login', async (req, res) => {
 
     // BLOCK DELETED OR SUSPENDED USERS
     if (user.status === 'deleted' || user.is_deleted === 1) {
-      return res.status(403).json({ message: 'This account has been suspended or deleted by administration.' });
+      return res.status(403).json({ message: 'User not found' });
     }
 
     const validPassword = await bcrypt.compare(password, user.password || user.password_hash);
