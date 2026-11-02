@@ -107,6 +107,63 @@ router.get('/dashboard', verifyToken, async (req, res) => {
   }
 });
 
+// POST User Withdrawal Request
+router.post('/withdraw', verifyToken, async (req, res) => {
+  const { amount, fundPassword, channel, accountNumber } = req.body;
+  const userId = req.user.id;
+
+  if (!amount || isNaN(amount) || amount < 50) {
+    return res.status(400).json({ success: false, message: 'Minimum withdrawal amount is GH₵ 50.00.' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    // 1. Check user balance
+    const [users] = await connection.query('SELECT balance FROM users WHERE id = ? FOR UPDATE', [userId]);
+    if (users.length === 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    const user = users[0];
+    if (user.balance < amount) {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({ success: false, message: 'Insufficient balance for withdrawal.' });
+    }
+
+    // 2. Deduct balance and insert withdrawal record
+    const fee = amount * 0.10;
+    const netAmount = amount - fee;
+
+    await connection.query('UPDATE users SET balance = balance - ? WHERE id = ?', [amount, userId]);
+
+    await connection.query(
+      `INSERT INTO withdrawals (user_id, amount, fee, net_amount, channel, account_number, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+      [userId, amount, fee, netAmount, channel || 'MTN', accountNumber || 'N/A']
+    );
+
+    // 3. Record transaction
+    await connection.query(
+      `INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, 'withdrawal', ?, ?, 'pending')`,
+      [userId, `Withdrawal via ${channel || 'MTN'}`, amount]
+    );
+
+    await connection.commit();
+    connection.release();
+
+    res.json({ success: true, message: 'Withdrawal request submitted successfully!' });
+  } catch (err) {
+    await connection.rollback();
+    connection.release();
+    console.error('Withdrawal error:', err);
+    res.status(500).json({ success: false, message: 'Server error processing withdrawal.' });
+  }
+});
+
 // GET User Transactions (Queries exclusively from the transactions table)
 router.get('/transactions', verifyToken, async (req, res) => {
   try {
