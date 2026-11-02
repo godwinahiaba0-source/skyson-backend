@@ -13,7 +13,6 @@ router.post('/login', async (req, res) => {
   }
 
   try {
-    // Query the dedicated 'admins' table
     const [admins] = await pool.query('SELECT * FROM admins WHERE username = ?', [username]);
 
     if (admins.length === 0) {
@@ -22,7 +21,6 @@ router.post('/login', async (req, res) => {
 
     const admin = admins[0];
 
-    // Password verification check (supports bcrypt or plain text fallback)
     let passwordMatch = false;
     if (admin.password && (admin.password.startsWith('$2b$') || admin.password.startsWith('$2a$'))) {
       passwordMatch = await bcrypt.compare(password, admin.password);
@@ -94,7 +92,7 @@ router.get('/users', verifyAdmin, async (req, res) => {
   }
 });
 
-// GET Recharges from the 'recharges' table
+// GET Recharges
 router.get('/recharges', verifyAdmin, async (req, res) => {
   try {
     const [recharges] = await pool.query(`
@@ -164,6 +162,73 @@ router.post('/recharge/action', verifyAdmin, async (req, res) => {
   }
 });
 
+// GET All Withdrawals for Admin Panel
+router.get('/withdrawals', verifyAdmin, async (req, res) => {
+  try {
+    const [withdrawals] = await pool.query(`
+      SELECT w.*, u.username, u.email 
+      FROM withdrawals w
+      LEFT JOIN users u ON w.user_id = u.id
+      ORDER BY w.created_at DESC
+    `);
+    res.json({ success: true, withdrawals });
+  } catch (err) {
+    console.error('Admin fetch withdrawals error:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch withdrawals.' });
+  }
+});
+
+// POST Approve or Reject Withdrawal
+router.post('/withdrawal/action', verifyAdmin, async (req, res) => {
+  const { withdrawalId, action } = req.body;
+  if (!withdrawalId || !['approved', 'rejected'].includes(action)) {
+    return res.status(400).json({ success: false, message: 'Invalid parameters.' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [withdrawals] = await connection.query('SELECT * FROM withdrawals WHERE id = ? FOR UPDATE', [withdrawalId]);
+    if (withdrawals.length === 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(404).json({ success: false, message: 'Withdrawal request not found.' });
+    }
+
+    const withdrawal = withdrawals[0];
+    if (withdrawal.status === 'approved' || withdrawal.status === 'rejected') {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({ success: false, message: `Withdrawal is already ${withdrawal.status}.` });
+    }
+
+    // Update status
+    await connection.query('UPDATE withdrawals SET status = ? WHERE id = ?', [action, withdrawalId]);
+
+    // Update transaction log
+    await connection.query(
+      'UPDATE transactions SET status = ? WHERE user_id = ? AND type = "withdrawal" AND amount = ? AND status = "pending" ORDER BY created_at DESC LIMIT 1',
+      [action === 'approved' ? 'success' : 'failed', withdrawal.user_id, withdrawal.amount]
+    );
+
+    // If rejected, refund user's withdrawable balance
+    if (action === 'rejected') {
+      await connection.query('UPDATE users SET balance = balance + ? WHERE id = ?', [withdrawal.amount, withdrawal.user_id]);
+    }
+
+    await connection.commit();
+    connection.release();
+
+    res.json({ success: true, message: `Withdrawal successfully ${action}!` });
+  } catch (err) {
+    await connection.rollback();
+    connection.release();
+    console.error('Withdrawal action error:', err);
+    res.status(500).json({ success: false, message: 'Server error processing withdrawal.' });
+  }
+});
+
 // POST Manual Balance Adjustment
 router.post('/users/balance', verifyAdmin, async (req, res) => {
   const { username, balanceType, type, amount } = req.body;
@@ -209,7 +274,7 @@ router.post('/users/reset-password', verifyAdmin, async (req, res) => {
   try {
     const [users] = await pool.query('SELECT id, username FROM users WHERE username = ? OR id = ?', [username, username]);
     
-    if (users.length ===0) {
+    if (users.length === 0) {
       return res.status(404).json({ success: false, message: 'User account not found.' });
     }
     
