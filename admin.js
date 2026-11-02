@@ -148,7 +148,7 @@ router.post('/recharge/action', verifyAdmin, async (req, res) => {
     } else {
       await connection.query(
         'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
-        [recharge.user_id, 'recharge', `Recharge (${refCode})`, recharge.amount, 'rejected']
+        [recharge.user_id, 'recharge', `Recharge (${refCode})`, recharge.amount, 'failed']
       );
     }
 
