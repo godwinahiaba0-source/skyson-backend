@@ -81,14 +81,84 @@ router.get('/stats', verifyAdmin, async (req, res) => {
   }
 });
 
-// GET All Users List
+// GET All Users with referral metrics & inviter phone
 router.get('/users', verifyAdmin, async (req, res) => {
   try {
-    const [users] = await pool.query('SELECT id, username, email, balance, deposit_balance, invitation_code, created_at FROM users ORDER BY created_at DESC');
+    const [users] = await pool.query(`
+      SELECT u.id, u.phone, u.balance, u.deposit_balance, u.vip_level, u.status, u.is_deleted, u.can_withdraw, u.created_at,
+             ref.phone as invited_by_phone
+      FROM users u
+      LEFT JOIN users ref ON u.invited_by = ref.id
+      ORDER BY u.created_at DESC
+    `);
     res.json({ success: true, users });
   } catch (err) {
     console.error('Admin users fetch error:', err);
     res.status(500).json({ success: false, message: 'Failed to fetch users.' });
+  }
+});
+
+// POST Toggle User Withdrawal Permission (Enable/Disable)
+router.post('/users/toggle-withdrawal', verifyAdmin, async (req, res) => {
+  const { userId, enabled } = req.body;
+  if (userId === undefined || enabled === undefined) {
+    return res.status(400).json({ success: false, message: 'Invalid parameters.' });
+  }
+
+  try {
+    await pool.query('UPDATE users SET can_withdraw = ? WHERE id = ?', [enabled ? 1 : 0, userId]);
+    res.json({ success: true, message: `Withdrawal permission ${enabled ? 'enabled' : 'disabled'} for user #${userId}` });
+  } catch (err) {
+    console.error('Toggle withdrawal error:', err);
+    res.status(500).json({ success: false, message: 'Server error updating withdrawal status.' });
+  }
+});
+
+// POST Soft Delete or Restore User Account
+router.post('/users/action', verifyAdmin, async (req, res) => {
+  const { userId, action } = req.body;
+  if (!userId || !['delete', 'restore'].includes(action)) {
+    return res.status(400).json({ success: false, message: 'Invalid parameters.' });
+  }
+
+  try {
+    const isDeleted = action === 'delete' ? 1 : 0;
+    const statusStr = action === 'delete' ? 'deleted' : 'active';
+
+    await pool.query('UPDATE users SET is_deleted = ?, status = ? WHERE id = ?', [isDeleted, statusStr, userId]);
+    res.json({ success: true, message: `User account successfully ${action}d!` });
+  } catch (err) {
+    console.error('User action error:', err);
+    res.status(500).json({ success: false, message: 'Server error processing user action.' });
+  }
+});
+
+// GET User Downline Referral Tree (Level 1, 2, 3)
+router.get('/users/:id/referrals', verifyAdmin, async (req, res) => {
+  const userId = req.params.id;
+  try {
+    // Fetch Level 1 referrals
+    const [lvl1] = await pool.query('SELECT id, phone, balance, created_at FROM users WHERE invited_by = ?', [userId]);
+    
+    let allTree = [];
+    for (let u1 of lvl1) {
+      allTree.push({ ...u1, level: 1 });
+      // Fetch Level 2 referrals
+      const [lvl2] = await pool.query('SELECT id, phone, balance, created_at FROM users WHERE invited_by = ?', [u1.id]);
+      for (let u2 of lvl2) {
+        allTree.push({ ...u2, level: 2 });
+        // Fetch Level 3 referrals
+        const [lvl3] = await pool.query('SELECT id, phone, balance, created_at FROM users WHERE invited_by = ?', [u2.id]);
+        for (let u3 of lvl3) {
+          allTree.push({ ...u3, level: 3 });
+        }
+      }
+    }
+
+    res.json({ success: true, tree: allTree });
+  } catch (err) {
+    console.error('Fetch referral tree error:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch referral tree.' });
   }
 });
 
