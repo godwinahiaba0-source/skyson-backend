@@ -233,8 +233,9 @@ router.get('/withdrawals', verifyAdmin, async (req, res) => {
 });
 
 // POST Approve or Reject Withdrawal with Live Status Sync
+// POST Approve or Reject Withdrawal with Unified Ledger Sync
 router.post('/withdrawal/action', verifyAdmin, async (req, res) => {
-  const { withdrawalId, action } = req.body; // action can be 'approved' or 'rejected'
+  const { withdrawalId, action } = req.body; // 'approved' or 'rejected'
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
@@ -248,19 +249,19 @@ router.post('/withdrawal/action', verifyAdmin, async (req, res) => {
     
     const withdrawal = withdrawals[0];
     
-    // Update withdrawal status ('approved' or 'rejected')
+    // 1. Update withdrawals table status
     await connection.query('UPDATE withdrawals SET status = ? WHERE id = ?', [action, withdrawalId]);
 
-    // If rejected, refund the amount back to the user's balance
+    // 2. Update matching record in the transactions table so user UI reflects it instantly!
+    const mappedStatus = action === 'approved' ? 'success' : 'rejected';
+    await connection.query(
+      'UPDATE transactions SET status = ? WHERE user_id = ? AND type = "withdrawal" AND amount = ? AND status = "pending" ORDER BY created_at DESC LIMIT 1',
+      [mappedStatus, withdrawal.user_id, withdrawal.amount]
+    );
+
+    // 3. If rejected, refund the amount back to the user's balance
     if (action === 'rejected') {
       await connection.query('UPDATE users SET balance = balance + ? WHERE id = ?', [withdrawal.amount, withdrawal.user_id]);
-    }
-
-    // Also update any unified transactions table if you use one
-    try {
-      await connection.query('UPDATE transactions SET status = ? WHERE reference_id = ? AND type = "withdrawal"', [action, withdrawalId]);
-    } catch (e) {
-      // Table might not exist or use a different schema, safe to ignore
     }
 
     await connection.commit();
