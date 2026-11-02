@@ -85,23 +85,31 @@ router.post('/recharge/action', verifyAdmin, async (req, res) => {
     }
 
     const recharge = recharges[0];
-    if (recharge.status === 'approved') {
+    if (recharge.status === 'approved' || recharge.status === 'rejected') {
       await connection.rollback();
       connection.release();
-      return res.status(400).json({ success: false, message: 'Recharge is already approved.' });
+      return res.status(400).json({ success: false, message: `Recharge is already ${recharge.status}.` });
     }
 
     // Update recharge status in the recharges table
     await connection.query('UPDATE recharges SET status = ? WHERE id = ?', [action, rechargeId]);
 
-    // If approved, credit user's deposit_balance (lease-only funds)
+    const refCode = recharge.reference || recharge.channel || 'Manual';
+
     if (action === 'approved') {
+      // Credit user's deposit_balance (lease-only funds)
       await connection.query('UPDATE users SET deposit_balance = deposit_balance + ? WHERE id = ?', [recharge.amount, recharge.user_id]);
       
-      // Log transaction history
+      // Log successful transaction with clean format: Recharge (reference)
       await connection.query(
         'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
-        [recharge.user_id, 'recharge', `Approved Recharge (${recharge.reference || 'Manual'})`, recharge.amount, 'success']
+        [recharge.user_id, 'recharge', `Recharge (${refCode})`, recharge.amount, 'success']
+      );
+    } else {
+      // Log rejected transaction with red status support
+      await connection.query(
+        'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
+        [recharge.user_id, 'recharge', `Recharge (${refCode})`, recharge.amount, 'rejected']
       );
     }
 
