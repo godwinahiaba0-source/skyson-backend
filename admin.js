@@ -232,7 +232,6 @@ router.get('/withdrawals', verifyAdmin, async (req, res) => {
   }
 });
 
-// POST Approve or Reject Withdrawal with Live Status Sync
 // POST Approve or Reject Withdrawal with Unified Ledger Sync
 router.post('/withdrawal/action', verifyAdmin, async (req, res) => {
   const { withdrawalId, action } = req.body; // 'approved' or 'rejected'
@@ -252,7 +251,7 @@ router.post('/withdrawal/action', verifyAdmin, async (req, res) => {
     // 1. Update withdrawals table status
     await connection.query('UPDATE withdrawals SET status = ? WHERE id = ?', [action, withdrawalId]);
 
-    // 2. Update matching record in the transactions table so user UI reflects it instantly!
+    // 2. Update matching record in the transactions table so user UI reflects it instantly
     const mappedStatus = action === 'approved' ? 'success' : 'rejected';
     await connection.query(
       'UPDATE transactions SET status = ? WHERE user_id = ? AND type = "withdrawal" AND amount = ? AND status = "pending" ORDER BY created_at DESC LIMIT 1',
@@ -275,19 +274,46 @@ router.post('/withdrawal/action', verifyAdmin, async (req, res) => {
   }
 });
 
-// POST Manual Balance Adjustment
+// POST Manual Balance Adjustment with Transaction Ledger Recording
 router.post('/users/balance', verifyAdmin, async (req, res) => {
   const { username, balanceType, type, amount } = req.body;
   const field = balanceType === 'deposit_balance' ? 'deposit_balance' : 'balance';
-  const changeAmt = parseFloat(amount) * (type === 'add' ? 1 : -1);
+  const numericAmount = parseFloat(amount) || 0;
+  const changeAmt = numericAmount * (type === 'add' ? 1 : -1);
 
+  const connection = await pool.getConnection();
   try {
-    const [users] = await pool.query('SELECT id FROM users WHERE username = ? OR id = ?', [username, username]);
-    if (users.length === 0) return res.status(404).json({ success: false, message: 'User not found.' });
+    await connection.beginTransaction();
+
+    const [users] = await connection.query('SELECT id FROM users WHERE username = ? OR id = ?', [username, username]);
+    if (users.length === 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
     
-    await pool.query(`UPDATE users SET ${field} = ${field} + ? WHERE id = ?`, [changeAmt, users[0].id]);
-    res.json({ success: true, message: 'Balance adjusted successfully!' });
+    const targetUserId = users[0].id;
+
+    // 1. Update user balance
+    await connection.query(`UPDATE users SET ${field} = ${field} + ? WHERE id = ?`, [changeAmt, targetUserId]);
+
+    // 2. Log transaction in the master ledger so it displays in user transaction history
+    const txType = balanceType === 'deposit_balance' ? 'recharge' : 'earnings';
+    const description = `Admin Manual ${type === 'add' ? 'Credit' : 'Debit'} (${balanceType.replace('_', ' ')})`;
+    const recordAmount = type === 'add' ? numericAmount : -numericAmount;
+
+    await connection.query(
+      `INSERT INTO transactions (user_id, type, description, amount, status, created_at) VALUES (?, ?, ?, ?, 'success', NOW())`,
+      [targetUserId, txType, description, recordAmount]
+    );
+
+    await connection.commit();
+    connection.release();
+    res.json({ success: true, message: 'Balance adjusted and logged successfully!' });
   } catch (err) {
+    await connection.rollback();
+    connection.release();
+    console.error('Balance adjustment error:', err);
     res.status(500).json({ success: false, message: 'Server error adjusting balance.' });
   }
 });
