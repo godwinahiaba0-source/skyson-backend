@@ -4,6 +4,48 @@ const pool = require('./db');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 
+// POST Admin Login
+router.post('/login', async (req, res) => {
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ success: false, message: 'Username and password are required.' });
+  }
+
+  try {
+    const [users] = await pool.query('SELECT * FROM users WHERE username = ? AND role = "admin"', [username]);
+
+    if (users.length === 0) {
+      return res.status(401).json({ success: false, message: 'Invalid admin credentials.' });
+    }
+
+    const admin = users[0];
+
+    // Password verification check (supports bcrypt or plain text fallback)
+    let passwordMatch = false;
+    if (admin.password && (admin.password.startsWith('$2b$') || admin.password.startsWith('$2a$'))) {
+      passwordMatch = await bcrypt.compare(password, admin.password);
+    } else {
+      passwordMatch = (admin.password === password);
+    }
+
+    if (!passwordMatch) {
+      return res.status(401).json({ success: false, message: 'Invalid admin credentials.' });
+    }
+
+    const token = jwt.sign(
+      { id: admin.id, username: admin.username, role: 'admin' },
+      process.env.JWT_SECRET || 'skyson_secure_super_secret_key_2026',
+      { expiresIn: '24h' }
+    );
+
+    res.json({ success: true, token, message: 'Login successful!' });
+  } catch (err) {
+    console.error('Admin login error:', err);
+    res.status(500).json({ success: false, message: 'Server error during login.' });
+  }
+});
+
 // Admin Verification Middleware
 const verifyAdmin = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -69,7 +111,7 @@ router.get('/recharges', verifyAdmin, async (req, res) => {
 
 // POST Approve or Reject Recharge
 router.post('/recharge/action', verifyAdmin, async (req, res) => {
-  const { rechargeId, action } = req.body; // action: 'approved' or 'rejected'
+  const { rechargeId, action } = req.body;
   if (!rechargeId || !['approved', 'rejected'].includes(action)) {
     return res.status(400).json({ success: false, message: 'Invalid parameters.' });
   }
@@ -92,22 +134,17 @@ router.post('/recharge/action', verifyAdmin, async (req, res) => {
       return res.status(400).json({ success: false, message: `Recharge is already ${recharge.status}.` });
     }
 
-    // Update recharge status in the recharges table
     await connection.query('UPDATE recharges SET status = ? WHERE id = ?', [action, rechargeId]);
 
     const refCode = recharge.reference || recharge.channel || 'Manual';
 
     if (action === 'approved') {
-      // Credit user's deposit_balance (lease-only funds)
       await connection.query('UPDATE users SET deposit_balance = deposit_balance + ? WHERE id = ?', [recharge.amount, recharge.user_id]);
-      
-      // Log successful transaction with clean format: Recharge (reference)
       await connection.query(
         'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
         [recharge.user_id, 'recharge', `Recharge (${refCode})`, recharge.amount, 'success']
       );
     } else {
-      // Log rejected transaction with red status support
       await connection.query(
         'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
         [recharge.user_id, 'recharge', `Recharge (${refCode})`, recharge.amount, 'rejected']
@@ -146,7 +183,6 @@ router.post('/users/balance', verifyAdmin, async (req, res) => {
 
     await pool.query(`UPDATE users SET ${field} = ${field} + ? WHERE id = ?`, [changeAmt, user.id]);
     
-    // Log transaction history
     await pool.query(
       'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
       [user.id, 'admin_adjustment', `Admin ${type} GH₵ ${parseFloat(amount).toFixed(2)} to ${field}`, changeAmt, 'success']
@@ -159,7 +195,7 @@ router.post('/users/balance', verifyAdmin, async (req, res) => {
   }
 });
 
-// POST Reset User Password (Supports bcrypt & plaintext compatibility)
+// POST Reset User Password
 router.post('/users/reset-password', verifyAdmin, async (req, res) => {
   const { username, newPassword } = req.body;
   
@@ -177,17 +213,14 @@ router.post('/users/reset-password', verifyAdmin, async (req, res) => {
     }
     
     const user = users[0];
-
-    // Generate hash using bcrypt for standard login verification
     const hashedPassword = await bcrypt.hash(cleanPassword, 10);
 
-    // Updates the password column in MySQL with hashed password
     await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, user.id]);
 
     res.json({ success: true, message: `Password successfully updated for user "${user.username}"!` });
   } catch (err) {
     console.error('Password reset error:', err);
-    res.status(500).json({ success: false, message: 'Server error updating password.' });
+    res.status(500).json({ success: false, message: 'Server error resetting password.' });
   }
 });
 
