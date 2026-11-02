@@ -333,4 +333,56 @@ router.post('/users/reset-password', verifyAdmin, async (req, res) => {
   }
 });
 
+// GET All Bonus Codes
+router.get('/bonus-codes', verifyAdmin, async (req, res) => {
+  try {
+    const [codes] = await pool.query(`
+      SELECT bc.*, u.username as claimed_by_username 
+      FROM bonus_codes bc
+      LEFT JOIN users u ON bc.claimed_by = u.id
+      ORDER BY bc.created_at DESC
+    `);
+    res.json({ success: true, codes });
+  } catch (err) {
+    console.error('Fetch bonus codes error:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch bonus codes.' });
+  }
+});
+
+// POST Create Bonus Code
+router.post('/bonus-codes/create', verifyAdmin, async (req, res) => {
+  const { code, amount } = req.body;
+  
+  if (!code || !amount || isNaN(amount) || amount <= 0) {
+    return res.status(400).json({ success: false, message: 'Valid code and amount are required.' });
+  }
+
+  const cleanCode = code.trim().toUpperCase();
+
+  try {
+    await pool.query(
+      'INSERT INTO bonus_codes (code, amount, status) VALUES (?, ?, "unused")',
+      [cleanCode, parseFloat(amount)]
+    );
+    res.json({ success: true, message: `Bonus code ${cleanCode} created successfully!` });
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(400).json({ success: false, message: 'This bonus code already exists.' });
+    }
+    console.error('Create bonus code error:', err);
+    res.status(500).json({ success: false, message: 'Server error creating bonus code.' });
+  }
+});
+
+// POST Delete Bonus Code
+router.post('/bonus-codes/delete', verifyAdmin, async (req, res) => {
+  const { codeId } = req.body;
+  try {
+    await pool.query('DELETE FROM bonus_codes WHERE id = ?', [codeId]);
+    res.json({ success: true, message: 'Bonus code deleted successfully!' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to delete bonus code.' });
+  }
+});
+
 module.exports = router;
