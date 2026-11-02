@@ -4,11 +4,18 @@ const pool = require('./db');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
+
+// Ensure 'uploads' directory exists locally and on Railway
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
 
 // Configure multer storage for uploaded payment proofs
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, 'uploads'));
+    cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
     cb(null, `proof_${Date.now()}_${file.originalname}`);
@@ -37,10 +44,12 @@ router.post('/submit', verifyToken, async (req, res) => {
     return res.status(400).json({ success: false, message: 'Valid amount is required.' });
   }
 
+  const finalRef = reference || transactionId || ('REC_' + Date.now());
+
   try {
     await pool.query(
-      `INSERT INTO recharges (user_id, amount, channel, transaction_id, reference, proof_image, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-      [req.user.id, amount, channel || 'Sky 03 Pay', transactionId || null, reference || null, null]
+      `INSERT INTO recharges (user_id, amount, channel, reference, proof_image, status) VALUES (?, ?, ?, ?, NULL, 'pending')`,
+      [req.user.id, amount, channel || 'Sky 03 Pay', finalRef]
     );
 
     res.json({ success: true, message: 'Recharge request submitted successfully!' });
@@ -59,10 +68,12 @@ router.post('/submit-with-proof', verifyToken, upload.single('proofImage'), asyn
     return res.status(400).json({ success: false, message: 'Valid amount is required.' });
   }
 
+  const finalRef = transactionId || ('USDT_' + Date.now());
+
   try {
     await pool.query(
-      `INSERT INTO recharges (user_id, amount, channel, transaction_id, reference, proof_image, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-      [req.user.id, amount, channel || 'USDT Pay', transactionId || null, null, proofImage]
+      `INSERT INTO recharges (user_id, amount, channel, reference, proof_image, status) VALUES (?, ?, ?, ?, ?, 'pending')`,
+      [req.user.id, amount, channel || 'USDT Pay', finalRef, proofImage]
     );
 
     res.json({ success: true, message: 'USDT deposit proof submitted successfully!' });
