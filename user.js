@@ -165,16 +165,37 @@ router.post('/withdraw', verifyToken, async (req, res) => {
 });
 
 // GET User Transactions (Queries exclusively from the transactions table)
+// GET User Transactions (Synced live with withdrawals & recharges)
 router.get('/transactions', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
 
+    // 1. Fetch raw transaction records
     const [records] = await pool.query(
       'SELECT id, type, description, amount, status, created_at as date FROM transactions WHERE user_id = ? ORDER BY created_at DESC',
       [userId]
     );
 
-    res.json({ success: true, records });
+    // 2. Fetch live withdrawal statuses to ensure sync
+    const [withdrawals] = await pool.query(
+      'SELECT id, amount, status, created_at FROM withdrawals WHERE user_id = ?',
+      [userId]
+    );
+
+    // Map live withdrawal statuses over transaction records if they match
+    const syncedRecords = records.map(tx => {
+      if (tx.type === 'withdrawal') {
+        const match = withdrawals.find(w => Number(w.amount) === Number(tx.amount) && Math.abs(new Date(w.created_at) - new Date(tx.date)) < 120000);
+        if (match) {
+          if (match.status === 'approved') tx.status = 'success';
+          else if (match.status === 'rejected') tx.status = 'rejected';
+          else tx.status = 'pending';
+        }
+      }
+      return tx;
+    });
+
+    res.json({ success: true, records: syncedRecords });
   } catch (err) {
     console.error('Fetch transactions error:', err);
     res.status(500).json({ success: false, message: 'Failed to fetch transactions.', records: [] });
