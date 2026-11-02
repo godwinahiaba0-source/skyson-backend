@@ -152,43 +152,22 @@ router.post('/bankcard/reset', verifyAdmin, async (req, res) => {
 });
 
 // GET User Downline Referral Tree
+// GET User Downline Referral Tree using team_referrals table
 router.get('/users/:id/referrals', verifyAdmin, async (req, res) => {
   const userId = req.params.id;
   try {
-    const [lvl1] = await pool.query('SELECT id, username, balance, created_at FROM users WHERE invited_by = ?', [userId]);
-    let allTree = [];
-    for (let u1 of lvl1) {
-      allTree.path = { ...u1, level: 1 };
-      allTree.push({ ...u1, level: 1 });
-      const [lvl2] = await pool.query('SELECT id, username, balance, created_at FROM users WHERE invited_by = ?', [u1.id]);
-      for (let u2 of lvl2) {
-        allTree.push({ ...u2, level: 2 });
-        const [lvl3] = await pool.query('SELECT id, username, balance, created_at FROM users WHERE invited_by = ?', [u2.id]);
-        for (let u3 of lvl3) {
-          allTree.push({ ...u3, level: 3 });
-        }
-      }
-    }
-    res.json({ success: true, tree: allTree });
+    const [tree] = await pool.query(`
+      SELECT u.id, u.username, u.balance, u.created_at, tr.level 
+      FROM team_referrals tr
+      JOIN users u ON tr.descendant_user_id = u.id
+      WHERE tr.ancestor_user_id = ?
+      ORDER BY tr.level ASC, tr.created_at DESC
+    `, [userId]);
+
+    res.json({ success: true, tree });
   } catch (err) {
     console.error('Fetch referral tree error:', err);
     res.status(500).json({ success: false, message: 'Failed to fetch referral tree.' });
-  }
-});
-
-// GET Recharges
-router.get('/recharges', verifyAdmin, async (req, res) => {
-  try {
-    const [recharges] = await pool.query(`
-      SELECT r.id, r.user_id, u.username, r.amount, r.channel, r.reference, r.proof_image, r.status, r.created_at 
-      FROM recharges r 
-      JOIN users u ON r.user_id = u.id 
-      ORDER BY r.created_at DESC
-    `);
-    res.json({ success: true, recharges });
-  } catch (err) {
-    console.error('Admin recharges fetch error:', err);
-    res.status(500).json({ success: false, message: 'Failed to fetch recharges.' });
   }
 });
 
