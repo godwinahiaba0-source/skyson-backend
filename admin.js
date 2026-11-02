@@ -186,7 +186,7 @@ router.post('/users/balance', verifyAdmin, async (req, res) => {
     
     await pool.query(
       'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
-      [user.id, 'admin_adjustment', `Admin ${type} GH₵ ${parseFloat(amount).toFixed(2)} to ${field}`, changeAmt, 'success']
+      [user.id, 'admin_adjustment', `Bonus Rewards`, changeAmt, 'success']
     );
 
     res.json({ success: true, message: `Successfully adjusted user balance!` });
