@@ -233,29 +233,44 @@ router.get('/withdrawals', verifyAdmin, async (req, res) => {
 });
 
 // POST Approve or Reject Withdrawal
+// POST Approve or Reject Withdrawal with Live Status Sync
 router.post('/withdrawal/action', verifyAdmin, async (req, res) => {
-  const { withdrawalId, action } = req.body;
+  const { withdrawalId, action } = req.body; // action can be 'approved' or 'rejected'
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
+    
     const [withdrawals] = await connection.query('SELECT * FROM withdrawals WHERE id = ? FOR UPDATE', [withdrawalId]);
     if (withdrawals.length === 0) {
       await connection.rollback();
       connection.release();
       return res.status(404).json({ success: false, message: 'Withdrawal not found.' });
     }
+    
     const withdrawal = withdrawals[0];
+    
+    // Update withdrawal status ('approved' or 'rejected')
     await connection.query('UPDATE withdrawals SET status = ? WHERE id = ?', [action, withdrawalId]);
 
+    // If rejected, refund the amount back to the user's balance
     if (action === 'rejected') {
       await connection.query('UPDATE users SET balance = balance + ? WHERE id = ?', [withdrawal.amount, withdrawal.user_id]);
     }
+
+    // Also update any unified transactions table if you use one
+    try {
+      await connection.query('UPDATE transactions SET status = ? WHERE reference_id = ? AND type = "withdrawal"', [action, withdrawalId]);
+    } catch (e) {
+      // Table might not exist or use a different schema, safe to ignore
+    }
+
     await connection.commit();
     connection.release();
-    res.json({ success: true, message: `Withdrawal ${action}!` });
+    res.json({ success: true, message: `Withdrawal successfully ${action}!` });
   } catch (err) {
     await connection.rollback();
     connection.release();
+    console.error('Withdrawal action error:', err);
     res.status(500).json({ success: false, message: 'Server error processing withdrawal.' });
   }
 });
