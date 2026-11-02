@@ -54,7 +54,7 @@ router.get('/users', verifyAdmin, async (req, res) => {
 router.get('/recharges', verifyAdmin, async (req, res) => {
   try {
     const [recharges] = await pool.query(`
-      SELECT r.id, r.user_id, u.username, r.amount, r.channel, r.reference, r.status, r.created_at 
+      SELECT r.id, r.user_id, u.username, r.amount, r.channel, r.reference, r.proof_image, r.status, r.created_at 
       FROM recharges r 
       JOIN users u ON r.user_id = u.id 
       ORDER BY r.created_at DESC
@@ -122,6 +122,62 @@ router.post('/recharge/action', verifyAdmin, async (req, res) => {
     connection.release();
     console.error('Recharge action error:', err);
     res.status(500).json({ success: false, message: 'Server error processing recharge.' });
+  }
+});
+
+// POST Manual Balance Adjustment
+router.post('/users/balance', verifyAdmin, async (req, res) => {
+  const { username, balanceType, type, amount } = req.body;
+  if (!username || !balanceType || !type || !amount || isNaN(amount)) {
+    return res.status(400).json({ success: false, message: 'Invalid parameters.' });
+  }
+
+  const field = balanceType === 'deposit_balance' ? 'deposit_balance' : 'balance';
+  const multiplier = type === 'add' ? 1 : -1;
+  const changeAmt = parseFloat(amount) * multiplier;
+
+  try {
+    const [users] = await pool.query('SELECT id, balance, deposit_balance FROM users WHERE username = ? OR id = ?', [username, username]);
+    if (users.length === 0) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+    const user = users[0];
+
+    await pool.query(`UPDATE users SET ${field} = ${field} + ? WHERE id = ?`, [changeAmt, user.id]);
+    
+    // Log transaction history
+    await pool.query(
+      'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
+      [user.id, 'admin_adjustment', `Admin ${type} GH₵ ${parseFloat(amount).toFixed(2)} to ${field}`, changeAmt, 'success']
+    );
+
+    res.json({ success: true, message: `Successfully adjusted user balance!` });
+  } catch (err) {
+    console.error('Balance adjustment error:', err);
+    res.status(500).json({ success: false, message: 'Server error adjusting balance.' });
+  }
+});
+
+// POST Reset User Password
+router.post('/users/reset-password', verifyAdmin, async (req, res) => {
+  const { username, newPassword } = req.body;
+  if (!username || !newPassword || newPassword.length < 8) {
+    return res.status(400).json({ success: false, message: 'Valid username and new password (min 8 chars) required.' });
+  }
+
+  try {
+    const [users] = await pool.query('SELECT id FROM users WHERE username = ? OR id = ?', [username, username]);
+    if (users.length === 0) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+    const user = users[0];
+
+    await pool.query('UPDATE users SET password = ? WHERE id = ?', [newPassword, user.id]);
+
+    res.json({ success: true, message: `Password successfully updated for ${username}!` });
+  } catch (err) {
+    console.error('Password reset error:', err);
+    res.status(500).json({ success: false, message: 'Server error resetting password.' });
   }
 });
 
