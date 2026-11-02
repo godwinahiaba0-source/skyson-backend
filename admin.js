@@ -171,6 +171,22 @@ router.get('/users/:id/referrals', verifyAdmin, async (req, res) => {
   }
 });
 
+// GET Recharges
+router.get('/recharges', verifyAdmin, async (req, res) => {
+  try {
+    const [recharges] = await pool.query(`
+      SELECT r.id, r.user_id, u.username, r.amount, r.channel, r.reference, r.proof_image, r.status, r.created_at 
+      FROM recharges r 
+      JOIN users u ON r.user_id = u.id 
+      ORDER BY r.created_at DESC
+    `);
+    res.json({ success: true, recharges });
+  } catch (err) {
+    console.error('Admin recharges fetch error:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch recharges.' });
+  }
+});
+
 // POST Approve or Reject Recharge
 router.post('/recharge/action', verifyAdmin, async (req, res) => {
   const { rechargeId, action } = req.body;
