@@ -104,6 +104,7 @@ router.get('/users', verifyAdmin, async (req, res) => {
 });
 
 // POST Toggle User Withdrawal Permission
+// POST Toggle User Withdrawal Permission
 router.post('/users/toggle-withdrawal', verifyAdmin, async (req, res) => {
   const { userId, enabled } = req.body;
   try {
@@ -117,7 +118,7 @@ router.post('/users/toggle-withdrawal', verifyAdmin, async (req, res) => {
 
 // POST Soft Delete or Restore User Account
 router.post('/users/action', verifyAdmin, async (req, res) => {
-  const { userId, action } = req.body;
+  const { userId, action } = req.body; // action can be 'delete' or 'restore'
   try {
     const isDeleted = action === 'delete' ? 1 : 0;
     const statusStr = action === 'delete' ? 'deleted' : 'active';
