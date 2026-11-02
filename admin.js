@@ -232,7 +232,6 @@ router.get('/withdrawals', verifyAdmin, async (req, res) => {
   }
 });
 
-// POST Approve or Reject Withdrawal
 // POST Approve or Reject Withdrawal with Live Status Sync
 router.post('/withdrawal/action', verifyAdmin, async (req, res) => {
   const { withdrawalId, action } = req.body; // action can be 'approved' or 'rejected'
