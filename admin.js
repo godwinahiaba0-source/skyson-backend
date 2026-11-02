@@ -159,25 +159,30 @@ router.post('/users/balance', verifyAdmin, async (req, res) => {
 });
 
 // POST Reset User Password
+// POST Reset User Password
 router.post('/users/reset-password', verifyAdmin, async (req, res) => {
   const { username, newPassword } = req.body;
+  
   if (!username || !newPassword || newPassword.length < 8) {
     return res.status(400).json({ success: false, message: 'Valid username and new password (min 8 chars) required.' });
   }
 
   try {
-    const [users] = await pool.query('SELECT id FROM users WHERE username = ? OR id = ?', [username, username]);
+    const [users] = await pool.query('SELECT id, username FROM users WHERE username = ? OR id = ?', [username, username]);
+    
     if (users.length === 0) {
-      return res.status(404).json({ success: false, message: 'User not found.' });
+      return res.status(404).json({ success: false, message: 'User account not found.' });
     }
+    
     const user = users[0];
 
+    // Updates the stored password column in your MySQL database
     await pool.query('UPDATE users SET password = ? WHERE id = ?', [newPassword, user.id]);
 
-    res.json({ success: true, message: `Password successfully updated for ${username}!` });
+    res.json({ success: true, message: `Password successfully updated for user "${user.username}"!` });
   } catch (err) {
     console.error('Password reset error:', err);
-    res.status(500).json({ success: false, message: 'Server error resetting password.' });
+    res.status(500).json({ success: false, message: 'Server error updating password.' });
   }
 });
 
