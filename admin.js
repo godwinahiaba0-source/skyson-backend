@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('./db');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
 
 // Admin Verification Middleware
 const verifyAdmin = (req, res, next) => {
@@ -158,14 +159,15 @@ router.post('/users/balance', verifyAdmin, async (req, res) => {
   }
 });
 
-// POST Reset User Password
-// POST Reset User Password
+// POST Reset User Password (Supports bcrypt & plaintext compatibility)
 router.post('/users/reset-password', verifyAdmin, async (req, res) => {
   const { username, newPassword } = req.body;
   
-  if (!username || !newPassword || newPassword.length < 8) {
+  if (!username || !newPassword || newPassword.trim().length < 8) {
     return res.status(400).json({ success: false, message: 'Valid username and new password (min 8 chars) required.' });
   }
+
+  const cleanPassword = newPassword.trim();
 
   try {
     const [users] = await pool.query('SELECT id, username FROM users WHERE username = ? OR id = ?', [username, username]);
@@ -176,8 +178,11 @@ router.post('/users/reset-password', verifyAdmin, async (req, res) => {
     
     const user = users[0];
 
-    // Updates the stored password column in your MySQL database
-    await pool.query('UPDATE users SET password = ? WHERE id = ?', [newPassword, user.id]);
+    // Generate hash using bcrypt for standard login verification
+    const hashedPassword = await bcrypt.hash(cleanPassword, 10);
+
+    // Updates the password column in MySQL with hashed password
+    await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, user.id]);
 
     res.json({ success: true, message: `Password successfully updated for user "${user.username}"!` });
   } catch (err) {
