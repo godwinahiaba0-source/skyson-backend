@@ -85,8 +85,8 @@ router.get('/stats', verifyAdmin, async (req, res) => {
 router.get('/users', verifyAdmin, async (req, res) => {
   try {
     const [users] = await pool.query(`
-      SELECT u.id, u.phone, u.balance, u.deposit_balance, u.vip_level, u.status, u.is_deleted, u.can_withdraw, u.created_at,
-             ref.phone as invited_by_phone
+      SELECT u.id, u.username, u.email, u.phone, u.balance, u.deposit_balance, u.vip_level, u.status, u.is_deleted, u.can_withdraw, u.created_at,
+             ref.username as invited_by_username
       FROM users u
       LEFT JOIN users ref ON u.invited_by = ref.id
       ORDER BY u.created_at DESC
@@ -133,22 +133,47 @@ router.post('/users/action', verifyAdmin, async (req, res) => {
   }
 });
 
+// POST Reset Bound Payment Account (Bank Card)
+router.post('/bankcard/reset', verifyAdmin, async (req, res) => {
+  const { userId, username, phone } = req.body;
+  try {
+    let targetUserId = userId;
+
+    if (!targetUserId && (username || phone)) {
+      const identifier = username || phone;
+      const [users] = await pool.query('SELECT id FROM users WHERE username = ? OR phone = ? OR id = ?', [identifier, identifier, identifier]);
+      if (users.length > 0) targetUserId = users[0].id;
+    }
+
+    if (!targetUserId) {
+      return res.status(404).json({ success: false, message: 'User not found by identifier.' });
+    }
+
+    await pool.query('DELETE FROM bank_cards WHERE user_id = ?', [targetUserId]);
+
+    res.json({ success: true, message: 'Payment account details reset successfully. User can now bind a new card.' });
+  } catch (err) {
+    console.error('Bank reset error:', err);
+    res.status(500).json({ success: false, message: 'Failed to reset bank card details.' });
+  }
+});
+
 // GET User Downline Referral Tree (Level 1, 2, 3)
 router.get('/users/:id/referrals', verifyAdmin, async (req, res) => {
   const userId = req.params.id;
   try {
     // Fetch Level 1 referrals
-    const [lvl1] = await pool.query('SELECT id, phone, balance, created_at FROM users WHERE invited_by = ?', [userId]);
+    const [lvl1] = await pool.query('SELECT id, username, balance, created_at FROM users WHERE invited_by = ?', [userId]);
     
     let allTree = [];
     for (let u1 of lvl1) {
       allTree.push({ ...u1, level: 1 });
       // Fetch Level 2 referrals
-      const [lvl2] = await pool.query('SELECT id, phone, balance, created_at FROM users WHERE invited_by = ?', [u1.id]);
+      const [lvl2] = await pool.query('SELECT id, username, balance, created_at FROM users WHERE invited_by = ?', [u1.id]);
       for (let u2 of lvl2) {
         allTree.push({ ...u2, level: 2 });
         // Fetch Level 3 referrals
-        const [lvl3] = await pool.query('SELECT id, phone, balance, created_at FROM users WHERE invited_by = ?', [u2.id]);
+        const [lvl3] = await pool.query('SELECT id, username, balance, created_at FROM users WHERE invited_by = ?', [u2.id]);
         for (let u3 of lvl3) {
           allTree.push({ ...u3, level: 3 });
         }
