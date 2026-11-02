@@ -81,12 +81,11 @@ router.get('/stats', verifyAdmin, async (req, res) => {
   }
 });
 
-// GET All Users with safe column checking & inviter username resolution
-// GET All Users with referral inviter resolved via team_referrals table
+// GET All Users with inviter resolution via team_referrals table (No VIP level)
 router.get('/users', verifyAdmin, async (req, res) => {
   try {
     const [users] = await pool.query(`
-      SELECT u.id, u.username, u.email, u.balance, u.deposit_balance, u.vip_level, 
+      SELECT u.id, u.username, u.email, u.balance, u.deposit_balance, 
              COALESCE(u.status, 'active') as status, 
              COALESCE(u.is_deleted, 0) as is_deleted, 
              COALESCE(u.can_withdraw, 1) as can_withdraw, 
