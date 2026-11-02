@@ -13,13 +13,14 @@ router.post('/login', async (req, res) => {
   }
 
   try {
-    const [users] = await pool.query('SELECT * FROM users WHERE username = ? AND role = "admin"', [username]);
+    // Query the dedicated 'admins' table
+    const [admins] = await pool.query('SELECT * FROM admins WHERE username = ?', [username]);
 
-    if (users.length === 0) {
+    if (admins.length === 0) {
       return res.status(401).json({ success: false, message: 'Invalid admin credentials.' });
     }
 
-    const admin = users[0];
+    const admin = admins[0];
 
     // Password verification check (supports bcrypt or plain text fallback)
     let passwordMatch = false;
@@ -206,10 +207,10 @@ router.post('/users/reset-password', verifyAdmin, async (req, res) => {
   const cleanPassword = newPassword.trim();
 
   try {
-    const [users] = await pool.query('SELECT id, username FROM admins WHERE username = ? OR id = ?', [username, username]);
+    const [users] = await pool.query('SELECT id, username FROM users WHERE username = ? OR id = ?', [username, username]);
     
-    if (users.length === 0) {
-      return res.status(404).json({ success: false, message: 'Admin account not found.' });
+    if (users.length ===0) {
+      return res.status(404).json({ success: false, message: 'User account not found.' });
     }
     
     const user = users[0];
