@@ -31,24 +31,25 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use(express.static(path.join(__dirname)));
 
 // ==========================================
-// 2. IMPORT ROUTES (Make sure paths match your folder)
+// 2. IMPORT ROUTES
 // ==========================================
 const authRoutes = require('./auth');
 const userRoutes = require('./user');
 const leaseRoutes = require('./lease');
 const rechargeRoutes = require('./recharge');
 const walletRoutes = require('./wallet'); 
-const teamRoutes = require('./team'); // Team report routes
-const adminRoutes = require('./admin'); // Admin panel routes
+const teamRoutes = require('./team'); 
+const adminRoutes = require('./admin'); 
 
-// Mount routes
+// Mount routes (walletRoutes mounted under /api/user so /api/user/bank-card resolves correctly)
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
+app.use('/api/user', walletRoutes); // Handles /api/user/bank-card and /api/user/
+app.use('/api/bankcard', walletRoutes); // Backward compatibility for /api/bankcard
 app.use('/api/lease', leaseRoutes);
 app.use('/api/recharge', rechargeRoutes);
-app.use('/api/bankcard', walletRoutes);
-app.use('/api', teamRoutes); // Mounts /api/team/report
-app.use('/api/admin', adminRoutes); // Mounts admin panel endpoints
+app.use('/api', teamRoutes); 
+app.use('/api/admin', adminRoutes); 
 
 // ==========================================
 // 3. SERVER STARTUP

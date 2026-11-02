@@ -16,8 +16,8 @@ const verifyToken = (req, res, next) => {
   });
 };
 
-// GET /api/bankcard - Check if user already has a bound card
-router.get('/', verifyToken, async (req, res) => {
+// Handler logic to fetch bank card
+const fetchBankCardHandler = async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM bank_cards WHERE user_id = ?', [req.user.id]);
     
@@ -30,21 +30,24 @@ router.get('/', verifyToken, async (req, res) => {
     console.error('CRITICAL FETCH BANKCARD ERROR:', err);
     res.status(500).json({ message: 'Server error fetching bank card.', error: err.message });
   }
-});
+};
 
-// POST /api/bankcard - Bind or update withdrawal card
-router.post('/', verifyToken, async (req, res) => {
+// Handler logic to bind bank card
+const bindBankCardHandler = async (req, res) => {
   try {
     console.log('BIND BANKCARD HIT WITH BODY:', req.body);
-    const { channel, official_name, account_number } = req.body;
+    const { channel, official_name, account_number, bank_name, phone_number } = req.body;
 
-    if (!channel || !official_name || !account_number) {
-      return res.status(400).json({ message: 'All fields are required.' });
+    const finalChannel = channel || bank_name;
+    const finalAccount = account_number || phone_number;
+    const finalName = official_name || 'Account Holder';
+
+    if (!finalChannel || !finalAccount) {
+      return res.status(400).json({ message: 'All required fields must be provided.' });
     }
 
     const userId = req.user.id;
 
-    // Insert or update if user already has a card in bank_cards table
     await pool.query(`
       INSERT INTO bank_cards (user_id, channel, official_name, account_number)
       VALUES (?, ?, ?, ?)
@@ -52,13 +55,20 @@ router.post('/', verifyToken, async (req, res) => {
         channel = VALUES(channel),
         official_name = VALUES(official_name),
         account_number = VALUES(account_number)
-    `, [userId, channel, official_name, account_number]);
+    `, [userId, finalChannel, finalName, finalAccount]);
 
     res.json({ message: 'Withdrawal account bound successfully!' });
   } catch (err) {
     console.error('CRITICAL BIND BANKCARD ERROR:', err);
     res.status(500).json({ message: 'Server error during account binding.', error: err.message });
   }
-});
+};
+
+// Support both root and /bank-card endpoints so frontend calls never 404
+router.get('/', verifyToken, fetchBankCardHandler);
+router.get('/bank-card', verifyToken, fetchBankCardHandler);
+
+router.post('/', verifyToken, bindBankCardHandler);
+router.post('/bank-card', verifyToken, bindBankCardHandler);
 
 module.exports = router;
