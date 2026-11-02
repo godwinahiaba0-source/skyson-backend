@@ -104,4 +104,4 @@ const getTeamReport = async (req, res) => {
     }
 };
 
-export { getTeamReport }; // Keep module.exports = { getTeamReport } if your app uses CommonJS
+module.exports = { getTeamReport };
