@@ -138,6 +138,12 @@ router.post('/login', async (req, res) => {
     }
 
     const user = users[0];
+
+    // BLOCK DELETED OR SUSPENDED USERS
+    if (user.status === 'deleted' || user.is_deleted === 1) {
+      return res.status(403).json({ message: 'This account has been suspended or deleted by administration.' });
+    }
+
     const validPassword = await bcrypt.compare(password, user.password || user.password_hash);
     if (!validPassword) {
       return res.status(400).json({ message: 'Invalid username or password.' });
