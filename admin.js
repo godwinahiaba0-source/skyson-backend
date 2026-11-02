@@ -81,11 +81,15 @@ router.get('/stats', verifyAdmin, async (req, res) => {
   }
 });
 
-// GET All Users with referral metrics & inviter phone
+// GET All Users with safe column checking
 router.get('/users', verifyAdmin, async (req, res) => {
   try {
     const [users] = await pool.query(`
-      SELECT u.id, u.username, u.email, u.phone, u.balance, u.deposit_balance, u.vip_level, u.status, u.is_deleted, u.can_withdraw, u.created_at,
+      SELECT u.id, u.username, u.email, u.balance, u.deposit_balance, u.vip_level, 
+             COALESCE(u.status, 'active') as status, 
+             COALESCE(u.is_deleted, 0) as is_deleted, 
+             COALESCE(u.can_withdraw, 1) as can_withdraw, 
+             u.created_at,
              ref.username as invited_by_username
       FROM users u
       LEFT JOIN users ref ON u.invited_by = ref.id
@@ -98,16 +102,12 @@ router.get('/users', verifyAdmin, async (req, res) => {
   }
 });
 
-// POST Toggle User Withdrawal Permission (Enable/Disable)
+// POST Toggle User Withdrawal Permission
 router.post('/users/toggle-withdrawal', verifyAdmin, async (req, res) => {
   const { userId, enabled } = req.body;
-  if (userId === undefined || enabled === undefined) {
-    return res.status(400).json({ success: false, message: 'Invalid parameters.' });
-  }
-
   try {
     await pool.query('UPDATE users SET can_withdraw = ? WHERE id = ?', [enabled ? 1 : 0, userId]);
-    res.json({ success: true, message: `Withdrawal permission ${enabled ? 'enabled' : 'disabled'} for user #${userId}` });
+    res.json({ success: true, message: `Withdrawal permission updated for user #${userId}` });
   } catch (err) {
     console.error('Toggle withdrawal error:', err);
     res.status(500).json({ success: false, message: 'Server error updating withdrawal status.' });
@@ -117,10 +117,6 @@ router.post('/users/toggle-withdrawal', verifyAdmin, async (req, res) => {
 // POST Soft Delete or Restore User Account
 router.post('/users/action', verifyAdmin, async (req, res) => {
   const { userId, action } = req.body;
-  if (!userId || !['delete', 'restore'].includes(action)) {
-    return res.status(400).json({ success: false, message: 'Invalid parameters.' });
-  }
-
   try {
     const isDeleted = action === 'delete' ? 1 : 0;
     const statusStr = action === 'delete' ? 'deleted' : 'active';
@@ -135,51 +131,44 @@ router.post('/users/action', verifyAdmin, async (req, res) => {
 
 // POST Reset Bound Payment Account (Bank Card)
 router.post('/bankcard/reset', verifyAdmin, async (req, res) => {
-  const { userId, username, phone } = req.body;
+  const { userId, username } = req.body;
   try {
     let targetUserId = userId;
-
-    if (!targetUserId && (username || phone)) {
-      const identifier = username || phone;
-      const [users] = await pool.query('SELECT id FROM users WHERE username = ? OR phone = ? OR id = ?', [identifier, identifier, identifier]);
+    if (!targetUserId && username) {
+      const [users] = await pool.query('SELECT id FROM users WHERE username = ? OR id = ?', [username, username]);
       if (users.length > 0) targetUserId = users[0].id;
     }
 
     if (!targetUserId) {
-      return res.status(404).json({ success: false, message: 'User not found by identifier.' });
+      return res.status(404).json({ success: false, message: 'User not found.' });
     }
 
     await pool.query('DELETE FROM bank_cards WHERE user_id = ?', [targetUserId]);
-
-    res.json({ success: true, message: 'Payment account details reset successfully. User can now bind a new card.' });
+    res.json({ success: true, message: 'Payment account details reset successfully.' });
   } catch (err) {
     console.error('Bank reset error:', err);
     res.status(500).json({ success: false, message: 'Failed to reset bank card details.' });
   }
 });
 
-// GET User Downline Referral Tree (Level 1, 2, 3)
+// GET User Downline Referral Tree
 router.get('/users/:id/referrals', verifyAdmin, async (req, res) => {
   const userId = req.params.id;
   try {
-    // Fetch Level 1 referrals
     const [lvl1] = await pool.query('SELECT id, username, balance, created_at FROM users WHERE invited_by = ?', [userId]);
-    
     let allTree = [];
     for (let u1 of lvl1) {
+      allTree.path = { ...u1, level: 1 };
       allTree.push({ ...u1, level: 1 });
-      // Fetch Level 2 referrals
       const [lvl2] = await pool.query('SELECT id, username, balance, created_at FROM users WHERE invited_by = ?', [u1.id]);
       for (let u2 of lvl2) {
         allTree.push({ ...u2, level: 2 });
-        // Fetch Level 3 referrals
         const [lvl3] = await pool.query('SELECT id, username, balance, created_at FROM users WHERE invited_by = ?', [u2.id]);
         for (let u3 of lvl3) {
           allTree.push({ ...u3, level: 3 });
         }
       }
     }
-
     res.json({ success: true, tree: allTree });
   } catch (err) {
     console.error('Fetch referral tree error:', err);
@@ -206,58 +195,32 @@ router.get('/recharges', verifyAdmin, async (req, res) => {
 // POST Approve or Reject Recharge
 router.post('/recharge/action', verifyAdmin, async (req, res) => {
   const { rechargeId, action } = req.body;
-  if (!rechargeId || !['approved', 'rejected'].includes(action)) {
-    return res.status(400).json({ success: false, message: 'Invalid parameters.' });
-  }
-
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-
     const [recharges] = await connection.query('SELECT * FROM recharges WHERE id = ? FOR UPDATE', [rechargeId]);
     if (recharges.length === 0) {
       await connection.rollback();
       connection.release();
-      return res.status(404).json({ success: false, message: 'Recharge record not found.' });
+      return res.status(404).json({ success: false, message: 'Recharge not found.' });
     }
-
     const recharge = recharges[0];
-    if (recharge.status === 'approved' || recharge.status === 'rejected') {
-      await connection.rollback();
-      connection.release();
-      return res.status(400).json({ success: false, message: `Recharge is already ${recharge.status}.` });
-    }
-
     await connection.query('UPDATE recharges SET status = ? WHERE id = ?', [action, rechargeId]);
-
-    const refCode = recharge.reference || recharge.channel || 'Manual';
 
     if (action === 'approved') {
       await connection.query('UPDATE users SET deposit_balance = deposit_balance + ? WHERE id = ?', [recharge.amount, recharge.user_id]);
-      await connection.query(
-        'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
-        [recharge.user_id, 'recharge', `Recharge (${refCode})`, recharge.amount, 'success']
-      );
-    } else {
-      await connection.query(
-        'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
-        [recharge.user_id, 'recharge', `Recharge (${refCode})`, recharge.amount, 'failed']
-      );
     }
-
     await connection.commit();
     connection.release();
-
-    res.json({ success: true, message: `Recharge successfully ${action}!` });
+    res.json({ success: true, message: `Recharge ${action}!` });
   } catch (err) {
     await connection.rollback();
     connection.release();
-    console.error('Recharge action error:', err);
     res.status(500).json({ success: false, message: 'Server error processing recharge.' });
   }
 });
 
-// GET All Withdrawals for Admin Panel (joined with bank_cards to get official_name)
+// GET All Withdrawals
 router.get('/withdrawals', verifyAdmin, async (req, res) => {
   try {
     const [withdrawals] = await pool.query(`
@@ -277,50 +240,27 @@ router.get('/withdrawals', verifyAdmin, async (req, res) => {
 // POST Approve or Reject Withdrawal
 router.post('/withdrawal/action', verifyAdmin, async (req, res) => {
   const { withdrawalId, action } = req.body;
-  if (!withdrawalId || !['approved', 'rejected'].includes(action)) {
-    return res.status(400).json({ success: false, message: 'Invalid parameters.' });
-  }
-
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-
     const [withdrawals] = await connection.query('SELECT * FROM withdrawals WHERE id = ? FOR UPDATE', [withdrawalId]);
     if (withdrawals.length === 0) {
       await connection.rollback();
       connection.release();
-      return res.status(404).json({ success: false, message: 'Withdrawal request not found.' });
+      return res.status(404).json({ success: false, message: 'Withdrawal not found.' });
     }
-
     const withdrawal = withdrawals[0];
-    if (withdrawal.status === 'approved' || withdrawal.status === 'rejected') {
-      await connection.rollback();
-      connection.release();
-      return res.status(400).json({ success: false, message: `Withdrawal is already ${withdrawal.status}.` });
-    }
-
-    // Update status
     await connection.query('UPDATE withdrawals SET status = ? WHERE id = ?', [action, withdrawalId]);
 
-    // Update transaction log
-    await connection.query(
-      'UPDATE transactions SET status = ? WHERE user_id = ? AND type = "withdrawal" AND amount = ? AND status = "pending" ORDER BY created_at DESC LIMIT 1',
-      [action === 'approved' ? 'success' : 'failed', withdrawal.user_id, withdrawal.amount]
-    );
-
-    // If rejected, refund user's withdrawable balance
     if (action === 'rejected') {
       await connection.query('UPDATE users SET balance = balance + ? WHERE id = ?', [withdrawal.amount, withdrawal.user_id]);
     }
-
     await connection.commit();
     connection.release();
-
-    res.json({ success: true, message: `Withdrawal successfully ${action}!` });
+    res.json({ success: true, message: `Withdrawal ${action}!` });
   } catch (err) {
     await connection.rollback();
     connection.release();
-    console.error('Withdrawal action error:', err);
     res.status(500).json({ success: false, message: 'Server error processing withdrawal.' });
   }
 });
@@ -328,31 +268,16 @@ router.post('/withdrawal/action', verifyAdmin, async (req, res) => {
 // POST Manual Balance Adjustment
 router.post('/users/balance', verifyAdmin, async (req, res) => {
   const { username, balanceType, type, amount } = req.body;
-  if (!username || !balanceType || !type || !amount || isNaN(amount)) {
-    return res.status(400).json({ success: false, message: 'Invalid parameters.' });
-  }
-
   const field = balanceType === 'deposit_balance' ? 'deposit_balance' : 'balance';
-  const multiplier = type === 'add' ? 1 : -1;
-  const changeAmt = parseFloat(amount) * multiplier;
+  const changeAmt = parseFloat(amount) * (type === 'add' ? 1 : -1);
 
   try {
-    const [users] = await pool.query('SELECT id, balance, deposit_balance FROM users WHERE username = ? OR id = ?', [username, username]);
-    if (users.length === 0) {
-      return res.status(404).json({ success: false, message: 'User not found.' });
-    }
-    const user = users[0];
-
-    await pool.query(`UPDATE users SET ${field} = ${field} + ? WHERE id = ?`, [changeAmt, user.id]);
+    const [users] = await pool.query('SELECT id FROM users WHERE username = ? OR id = ?', [username, username]);
+    if (users.length === 0) return res.status(404).json({ success: false, message: 'User not found.' });
     
-    await pool.query(
-      'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
-      [user.id, 'admin_adjustment', `Bonus Rewards`, changeAmt, 'success']
-    );
-
-    res.json({ success: true, message: `Successfully adjusted user balance!` });
+    await pool.query(`UPDATE users SET ${field} = ${field} + ? WHERE id = ?`, [changeAmt, users[0].id]);
+    res.json({ success: true, message: 'Balance adjusted successfully!' });
   } catch (err) {
-    console.error('Balance adjustment error:', err);
     res.status(500).json({ success: false, message: 'Server error adjusting balance.' });
   }
 });
@@ -360,28 +285,14 @@ router.post('/users/balance', verifyAdmin, async (req, res) => {
 // POST Reset User Password
 router.post('/users/reset-password', verifyAdmin, async (req, res) => {
   const { username, newPassword } = req.body;
-  
-  if (!username || !newPassword || newPassword.trim().length < 8) {
-    return res.status(400).json({ success: false, message: 'Valid username and new password (min 8 chars) required.' });
-  }
-
-  const cleanPassword = newPassword.trim();
-
   try {
-    const [users] = await pool.query('SELECT id, username FROM users WHERE username = ? OR id = ?', [username, username]);
+    const [users] = await pool.query('SELECT id FROM users WHERE username = ? OR id = ?', [username, username]);
+    if (users.length === 0) return res.status(404).json({ success: false, message: 'User not found.' });
     
-    if (users.length === 0) {
-      return res.status(404).json({ success: false, message: 'User account not found.' });
-    }
-    
-    const user = users[0];
-    const hashedPassword = await bcrypt.hash(cleanPassword, 10);
-
-    await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, user.id]);
-
-    res.json({ success: true, message: `Password successfully updated for user "${user.username}"!` });
+    const hashedPassword = await bcrypt.hash(newPassword.trim(), 10);
+    await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, users[0].id]);
+    res.json({ success: true, message: 'Password reset successfully!' });
   } catch (err) {
-    console.error('Password reset error:', err);
     res.status(500).json({ success: false, message: 'Server error resetting password.' });
   }
 });
