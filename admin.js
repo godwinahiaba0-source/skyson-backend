@@ -162,13 +162,14 @@ router.post('/recharge/action', verifyAdmin, async (req, res) => {
   }
 });
 
-// GET All Withdrawals for Admin Panel
+// GET All Withdrawals for Admin Panel (joined with bank_cards to get official_name)
 router.get('/withdrawals', verifyAdmin, async (req, res) => {
   try {
     const [withdrawals] = await pool.query(`
-      SELECT w.*, u.username, u.email 
+      SELECT w.*, u.username, u.email, bc.official_name, bc.channel as card_channel 
       FROM withdrawals w
       LEFT JOIN users u ON w.user_id = u.id
+      LEFT JOIN bank_cards bc ON w.user_id = bc.user_id
       ORDER BY w.created_at DESC
     `);
     res.json({ success: true, withdrawals });
