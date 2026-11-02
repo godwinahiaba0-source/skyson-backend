@@ -34,7 +34,7 @@ router.post('/register', async (req, res) => {
     if (inviterRows.length === 0) {
       await connection.rollback();
       connection.release();
-      return res.status(400).json({ message: 'Invalid invitation code. Code does not exist.' });
+      return res.status(400).json({ message: 'Invalid invitation code.' });
     }
 
     const level1AncestorId = inviterRows[0].id;
