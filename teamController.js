@@ -42,10 +42,10 @@ const getTeamReport = async (req, res) => {
             if (ids && ids.length > 0) {
                 const placeholders = ids.map(() => '?').join(',');
                 
-                // Calculate total approved recharges for this specific level safely
+                // Calculate total approved recharges for this specific level safely from 'recharges' table
                 const [rechargeRows] = await pool.query(
                     `SELECT COALESCE(SUM(amount), 0) as total_recharge, COUNT(DISTINCT user_id) as recharge_count 
-                     FROM deposits 
+                     FROM recharges 
                      WHERE user_id IN (${placeholders}) AND status = 'approved'`,
                     ids
                 ).catch(() => [[{ total_recharge: 0, recharge_count: 0 }]]);
@@ -61,12 +61,12 @@ const getTeamReport = async (req, res) => {
             };
         }
 
-        // Global team financial metrics across all levels (1, 2, 3)
+        // Global team financial metrics across all levels (1, 2, 3) using 'recharges' table
         if (allTeamIds.length > 0) {
             const placeholders = allTeamIds.map(() => '?').join(',');
 
             const [globalRecharge] = await pool.query(
-                `SELECT COALESCE(SUM(amount), 0) as total FROM deposits WHERE user_id IN (${placeholders}) AND status = 'approved'`,
+                `SELECT COALESCE(SUM(amount), 0) as total FROM recharges WHERE user_id IN (${placeholders}) AND status = 'approved'`,
                 allTeamIds
             ).catch(() => [[{ total: 0 }]]);
             const gRechargeRow = Array.isArray(globalRecharge) ? globalRecharge[0] : globalRecharge;
@@ -80,7 +80,7 @@ const getTeamReport = async (req, res) => {
             totalTeamWithdraw = parseFloat(gWithdrawRow?.total || 0);
 
             const [firstCharge] = await pool.query(
-                `SELECT COUNT(DISTINCT user_id) as cnt FROM deposits WHERE user_id IN (${placeholders}) AND status = 'approved'`,
+                `SELECT COUNT(DISTINCT user_id) as cnt FROM recharges WHERE user_id IN (${placeholders}) AND status = 'approved'`,
                 allTeamIds
             ).catch(() => [[{ cnt: 0 }]]);
             const fChargeRow = Array.isArray(firstCharge) ? firstCharge[0] : firstCharge;
@@ -104,4 +104,4 @@ const getTeamReport = async (req, res) => {
     }
 };
 
-module.exports = { getTeamReport };
+export { getTeamReport }; // Keep module.exports = { getTeamReport } if your app uses CommonJS
