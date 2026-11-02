@@ -3,7 +3,7 @@ const router = express.Router();
 const pool = require('./db');
 const jwt = require('jsonwebtoken');
 
-// Simple Admin Verification Middleware (Checks if user is admin or uses admin token secret)
+// Admin Verification Middleware
 const verifyAdmin = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -11,7 +11,6 @@ const verifyAdmin = (req, res, next) => {
 
   jwt.verify(token, process.env.JWT_SECRET || 'skyson_secure_super_secret_key_2026', (err, user) => {
     if (err) return res.status(403).json({ message: 'Invalid or expired token.' });
-    // You can add an explicit `is_admin` column check here or match a specific admin user ID/role
     req.user = user;
     next();
   });
@@ -22,7 +21,7 @@ router.get('/stats', verifyAdmin, async (req, res) => {
   try {
     const [usersCount] = await pool.query('SELECT COUNT(*) as total FROM users');
     const [leasesCount] = await pool.query('SELECT COUNT(*) as total FROM leases');
-    const [totalRecharged] = await pool.query('SELECT COALESCE(SUM(amount), 0) as total FROM recharges WHERE status = "approved"');
+    const [totalRecharged] = await pool.query('SELECT COALESCE(SUM(amount), 0) as total FROM recharge_requests WHERE status = "approved"');
     const [totalWithdrawn] = await pool.query('SELECT COALESCE(SUM(amount), 0) as total FROM withdrawals WHERE status = "approved"');
 
     res.json({
@@ -51,12 +50,12 @@ router.get('/users', verifyAdmin, async (req, res) => {
   }
 });
 
-// GET Pending Recharges/Deposits
+// GET Pending Recharges/Deposits from recharge_requests table
 router.get('/recharges', verifyAdmin, async (req, res) => {
   try {
     const [recharges] = await pool.query(`
       SELECT r.id, r.user_id, u.username, r.amount, r.status, r.created_at 
-      FROM recharges r 
+      FROM recharge_requests r 
       JOIN users u ON r.user_id = u.id 
       ORDER BY r.created_at DESC
     `);
@@ -78,7 +77,7 @@ router.post('/recharge/action', verifyAdmin, async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const [recharges] = await connection.query('SELECT * FROM recharges WHERE id = ? FOR UPDATE', [rechargeId]);
+    const [recharges] = await connection.query('SELECT * FROM recharge_requests WHERE id = ? FOR UPDATE', [rechargeId]);
     if (recharges.length === 0) {
       await connection.rollback();
       connection.release();
@@ -92,17 +91,17 @@ router.post('/recharge/action', verifyAdmin, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Recharge is already approved.' });
     }
 
-    // Update recharge status
-    await connection.query('UPDATE recharges SET status = ? WHERE id = ?', [action, rechargeId]);
+    // Update recharge request status
+    await connection.query('UPDATE recharge_requests SET status = ? WHERE id = ?', [action, rechargeId]);
 
     // If approved, credit user's deposit_balance (lease-only funds)
     if (action === 'approved') {
       await connection.query('UPDATE users SET deposit_balance = deposit_balance + ? WHERE id = ?', [recharge.amount, recharge.user_id]);
       
-      // Log transaction
+      // Log transaction history
       await connection.query(
         'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
-        [recharge.user_id, 'recharge', `Approved Recharge`, recharge.amount, 'success']
+        [recharge.user_id, 'recharge', `Approved Deposit Recharge`, recharge.amount, 'success']
       );
     }
 
