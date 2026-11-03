@@ -448,6 +448,7 @@ router.get('/fund/summary', verifyToken, async (req, res) => {
 });
 
 // POST Submit New Fund Investment (Linked to wealth_plans table)
+// POST Submit New Fund Investment (Aligned with your exact table schema)
 router.post('/fund/invest', verifyToken, async (req, res) => {
   const { planId, amount } = req.body;
   const userId = req.user.id;
@@ -461,6 +462,7 @@ router.post('/fund/invest', verifyToken, async (req, res) => {
   try {
     await connection.beginTransaction();
 
+    // 1. Fetch plan from wealth_plans table
     const [plans] = await connection.query('SELECT * FROM wealth_plans WHERE plan_id = ?', [planId]);
     if (plans.length === 0) {
       await connection.rollback();
@@ -477,6 +479,7 @@ router.post('/fund/invest', verifyToken, async (req, res) => {
       return res.status(400).json({ success: false, message: `Minimum investment for ${plan.plan_name} is GH₵ ${minAmt.toFixed(2)}` });
     }
 
+    // 2. Check user balance
     const [users] = await connection.query('SELECT balance FROM users WHERE id = ? FOR UPDATE', [userId]);
     if (users.length === 0) {
       await connection.rollback();
@@ -491,13 +494,21 @@ router.post('/fund/invest', verifyToken, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Insufficient balance for investment.' });
     }
 
+    // 3. Calculate return based on your table columns
+    const days = parseInt(plan.duration_days || plan.days || 3);
+    const profitPercent = parseFloat(plan.daily_profit_percentage || plan.profit_percent || 2.0);
+    const totalReturn = parsedAmount + (parsedAmount * (profitPercent / 100) * days);
+
+    // 4. Deduct user balance
     await connection.query('UPDATE users SET balance = balance - ? WHERE id = ?', [parsedAmount, userId]);
 
+    // 5. Insert matching your exact table columns: plan_name, amount, days, profit_percent, total_return
     await connection.query(
-      `INSERT INTO fund_investments (user_id, plan_id, amount, status) VALUES (?, ?, ?, 'active')`,
-      [userId, planId, parsedAmount]
+      `INSERT INTO fund_investments (user_id, plan_id, plan_name, amount, days, profit_percent, total_return, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`,
+      [userId, planId, plan.plan_name, parsedAmount, days, profitPercent, totalReturn]
     );
 
+    // 6. Log transaction
     await connection.query(
       `INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, 'investment', ?, ?, 'success')`,
       [userId, `Fund Investment (${plan.plan_name})`, parsedAmount]
@@ -511,7 +522,7 @@ router.post('/fund/invest', verifyToken, async (req, res) => {
     await connection.rollback();
     connection.release();
     console.error('Fund investment error:', err);
-    res.status(500).json({ success: false, message: 'Server error processing investment.' });
+    res.status(500).json({ success: false, message: 'Server error processing investment: ' + err.message });
   }
 });
 
