@@ -103,10 +103,23 @@ router.get('/dashboard', verifyToken, async (req, res) => {
   }
 });
 
-// POST User Withdrawal Request with Fund Password, Permission, Pending & Active Lease Check
+// POST User Withdrawal Request (Weekend Block, Active Lease Check, Fund Password & Limits)
 router.post('/withdraw', verifyToken, async (req, res) => {
   const { amount, fundPassword, channel, accountNumber } = req.body;
   const userId = req.user.id;
+
+  // ==========================================
+  // 1. WEEKEND WITHDRAWAL RESTRICTION CHECK (Sat & Sun)
+  // ==========================================
+  const today = new Date();
+  const dayOfWeek = today.getDay(); // 0 is Sunday, 6 is Saturday
+  if (dayOfWeek === 0 || dayOfWeek === 6) {
+    return res.status(400).json({ 
+      success: false, 
+      message: 'Withdrawals are closed on weekends (Saturdays and Sundays). Please submit your withdrawal request on a weekday.' 
+    });
+  }
+  // ==========================================
 
   if (!amount || isNaN(amount) || amount < 50) {
     return res.status(400).json({ success: false, message: 'Minimum withdrawal amount is GH₵ 50.00.' });
@@ -120,7 +133,7 @@ router.post('/withdraw', verifyToken, async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    // 1. Check if user has an active leased equipment (Account activation check)
+    // 2. Check if user has an active leased equipment (Account activation check)
     const [activeLeases] = await connection.query(
       'SELECT id FROM leases WHERE user_id = ?',
       [userId]
