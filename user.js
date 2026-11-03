@@ -380,4 +380,45 @@ router.post('/claim-bonus', verifyToken, async (req, res) => {
   }
 });
 
+// POST Update Fund Password (verifying with Account Login Password)
+router.post('/update-fund-password', verifyToken, async (req, res) => {
+  const { currentPassword, newPassword } = req.body; // currentPassword here is actually the Login Password
+  const userId = req.user.id;
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ success: false, message: 'Account password and new PIN are required.' });
+  }
+
+  try {
+    const [users] = await pool.query('SELECT * FROM users WHERE id = ?', [userId]);
+    if (users.length === 0) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    const user = users[0];
+
+    // 1. Verify against the MAIN ACCOUNT LOGIN PASSWORD
+    let isPasswordValid = false;
+    const storedPassword = user.password || user.password_hash;
+    
+    if (storedPassword && (storedPassword.startsWith('$2b$') || storedPassword.startsWith('$2a$'))) {
+      isPasswordValid = await bcrypt.compare(currentPassword, storedPassword);
+    } else {
+      isPasswordValid = (storedPassword === currentPassword);
+    }
+
+    if (!isPasswordValid) {
+      return res.status(400).json({ success: false, message: 'Incorrect account login password.' });
+    }
+
+    // 2. Save the new fund password (you can hash it or save directly depending on your setup)
+    const hashedNewPin = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE users SET fund_password = ? WHERE id = ?', [hashedNewPin, userId]);
+
+    res.json({ success: true, message: 'Fund password updated successfully!' });
+  } catch (err) {
+    console.error('Update fund password error:', err);
+    res.status(500).json({ success: false, message: 'Server error updating fund password.' });
+  }
+});
 module.exports = router;
