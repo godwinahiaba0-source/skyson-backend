@@ -103,7 +103,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
   }
 });
 
-// POST User Withdrawal Request with Fund Password, Permission & Pending Check
+// POST User Withdrawal Request with Fund Password, Permission, Pending & Active Lease Check
 router.post('/withdraw', verifyToken, async (req, res) => {
   const { amount, fundPassword, channel, accountNumber } = req.body;
   const userId = req.user.id;
@@ -119,6 +119,21 @@ router.post('/withdraw', verifyToken, async (req, res) => {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
+
+    // 1. Check if user has an active leased equipment (Account activation check)
+    const [activeLeases] = await connection.query(
+      'SELECT id FROM leases WHERE user_id = ?',
+      [userId]
+    );
+
+    if (activeLeases.length === 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Account not activated. You must lease at least one equipment before you can make a withdrawal.' 
+      });
+    }
 
     const [users] = await connection.query(
       'SELECT balance, can_withdraw, fund_password, password FROM users WHERE id = ? FOR UPDATE',
@@ -197,7 +212,6 @@ router.post('/withdraw', verifyToken, async (req, res) => {
   }
 });
 
-// GET User Transactions
 // GET User Transactions (Direct, reliable sync from transactions table)
 router.get('/transactions', verifyToken, async (req, res) => {
   try {
@@ -432,7 +446,6 @@ router.get('/fund/summary', verifyToken, async (req, res) => {
   }
 });
 
-// POST Submit New Fund Investment (Linked to wealth_plans table)
 // POST Submit New Fund Investment (Aligned with your exact table schema)
 router.post('/fund/invest', verifyToken, async (req, res) => {
   const { planId, amount } = req.body;
