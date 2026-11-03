@@ -445,4 +445,113 @@ router.post('/update-fund-password', verifyToken, async (req, res) => {
   }
 });
 
+// GET Fund Summary & Active Investments
+router.get('/fund/summary', verifyToken, async (tokenReq, res) => {
+  const userId = tokenReq.user.id;
+  try {
+    // 1. Calculate total active invested amount
+    const [activeRows] = await pool.query(
+      'SELECT COALESCE(SUM(amount), 0) as totalActive FROM fund_investments WHERE user_id = ? AND status = "active"',
+      [userId]
+    );
+    const totalActive = parseFloat(activeRows[0].totalActive || 0);
+
+    // 2. Calculate today's earnings from fund investments (if any)
+    const [earningRows] = await pool.query(`
+      SELECT COALESCE(SUM(amount * (daily_profit_percent / 100)), 0) as todayEarnings 
+      FROM fund_investments 
+      WHERE user_id = ? AND status = 'active'
+    `, [userId]);
+    const todayEarnings = parseFloat(earningRows[0].todayEarnings || 0);
+
+    // 3. Fetch list of investments for records modal
+    const [investments] = await pool.query(
+      'SELECT * FROM fund_investments WHERE user_id = ? ORDER BY created_at DESC',
+      [userId]
+    );
+
+    res.json({
+      success: true,
+      totalActive,
+      todayEarnings,
+      investments
+    });
+  } catch (err) {
+    console.error('Fund summary error:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch fund summary.' });
+  }
+});
+
+// POST Submit New Fund Investment
+router.post('/fund/invest', verifyToken, async (req, res) => {
+  const { planId, amount } = req.body;
+  const userId = req.user.id;
+
+  const parsedAmount = parseFloat(amount);
+  if (!parsedAmount || isNaN(parsedAmount) || parsedAmount < 50) {
+    return res.status(400).json({ success: false, message: 'Minimum investment amount is GH₵ 50.00.' });
+  }
+
+  // Define plans mapping matching savings.html
+  const plans = {
+    1: { name: '3 Days Cycle', days: 3, profitPercent: 2.0, min: 50 },
+    2: { name: '7 Days Cycle', days: 7, profitPercent: 5.0, min: 100 },
+    3: { name: '200 Days Cycle', days: 200, profitPercent: 250.0, min: 1000 }
+  };
+
+  const plan = plans[planId];
+  if (!plan) {
+    return res.status(400).json({ success: false, message: 'Invalid investment plan selected.' });
+  }
+
+  if (parsedAmount < plan.min) {
+    return res.status(400).json({ success: false, message: `Minimum investment for ${plan.name} is GH₵ ${plan.min.toFixed(2)}` });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    // 1. Check user balance
+    const [users] = await connection.query('SELECT balance FROM users WHERE id = ? FOR UPDATE', [userId]);
+    if (users.length === 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    const userBalance = parseFloat(users[0].balance || 0);
+    if (userBalance < parsedAmount) {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({ success: false, message: 'Insufficient balance for investment.' });
+    }
+
+    // 2. Deduct user balance
+    await connection.query('UPDATE users SET balance = balance - ? WHERE id = ?', [parsedAmount, userId]);
+
+    // 3. Insert fund investment record
+    await connection.query(
+      `INSERT INTO fund_investments (user_id, plan_id, amount, daily_profit_percent, duration_days, status) VALUES (?, ?, ?, ?, ?, 'active')`,
+      [userId, planId, parsedAmount, plan.profitPercent, plan.days]
+    );
+
+    // 4. Log transaction
+    await connection.query(
+      `INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, 'investment', ?, ?, 'success')`,
+      [userId, `Fund Investment (${plan.name})`, parsedAmount]
+    );
+
+    await connection.commit();
+    connection.release();
+
+    res.json({ success: true, message: 'Investment submitted successfully!' });
+  } catch (err) {
+    await connection.rollback();
+    connection.release();
+    console.error('Fund investment error:', err);
+    res.status(500).json({ success: false, message: 'Server error processing investment.' });
+  }
+});
+
 module.exports = router;
