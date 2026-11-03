@@ -107,7 +107,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
   }
 });
 
-// POST User Withdrawal Request with Permission Check
+// POST User Withdrawal Request with Permission & Pending Check
 router.post('/withdraw', verifyToken, async (req, res) => {
   const { amount, fundPassword, channel, accountNumber } = req.body;
   const userId = req.user.id;
@@ -135,6 +135,18 @@ router.post('/withdraw', verifyToken, async (req, res) => {
       await connection.rollback();
       connection.release();
       return res.status(403).json({ success: false, message: 'Withdrawal function not enabled.' });
+    }
+
+    // Block users if there is already a pending withdrawal request
+    const [pendingWithdrawals] = await connection.query(
+      'SELECT id FROM withdrawals WHERE user_id = ? AND status = "pending"',
+      [userId]
+    );
+
+    if (pendingWithdrawals.length > 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({ success: false, message: 'You already have a pending withdrawal request. Please wait for it to be processed.' });
     }
 
     if (user.balance < amount) {
