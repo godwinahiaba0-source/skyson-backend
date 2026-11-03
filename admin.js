@@ -388,4 +388,38 @@ router.post('/bonus-codes/delete', verifyAdmin, async (req, res) => {
   }
 });
 
+// POST Admin Impersonate / Login as User
+router.post('/users/impersonate', verifyAdmin, async (req, res) => {
+  const { userId } = req.body;
+  
+  if (!userId) {
+    return res.status(400).json({ success: false, message: 'User ID is required.' });
+  }
+
+  try {
+    const [users] = await pool.query('SELECT id, username, email FROM users WHERE id = ?', [userId]);
+    if (users.length === 0) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    const user = users[0];
+
+    // Generate a standard user session token
+    const token = jwt.sign(
+      { id: user.id, username: user.username, email: user.email },
+      process.env.JWT_SECRET || 'skyson_secure_super_secret_key_2026',
+      { expiresIn: '2h' }
+    );
+
+    res.json({
+      success: true,
+      token,
+      message: `Impersonation token generated for ${user.username}`
+    });
+  } catch (err) {
+    console.error('Impersonate error:', err);
+    res.status(500).json({ success: false, message: 'Server error generating user session.' });
+  }
+});
+
 module.exports = router;
