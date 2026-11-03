@@ -82,6 +82,7 @@ router.get('/stats', verifyAdmin, async (req, res) => {
 });
 
 // GET All Users with inviter resolution via team_referrals table (No VIP level)
+// GET All Users with team size count and inviter resolution
 router.get('/users', verifyAdmin, async (req, res) => {
   try {
     const [users] = await pool.query(`
@@ -90,7 +91,8 @@ router.get('/users', verifyAdmin, async (req, res) => {
              COALESCE(u.is_deleted, 0) as is_deleted, 
              COALESCE(u.can_withdraw, 1) as can_withdraw, 
              u.created_at,
-             COALESCE(ref.username, 'Direct / None') as invited_by_username
+             COALESCE(ref.username, 'Direct / None') as invited_by_username,
+             (SELECT COUNT(*) FROM team_referrals tr_count WHERE tr_count.ancestor_user_id = u.id) as team_count
       FROM users u
       LEFT JOIN team_referrals tr ON u.id = tr.descendant_user_id AND tr.level = 1
       LEFT JOIN users ref ON tr.ancestor_user_id = ref.id
