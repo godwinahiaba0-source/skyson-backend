@@ -16,7 +16,7 @@ const verifyToken = (req, res, next) => {
   });
 };
 
-// Buy Lease (Deducts strictly from deposit_balance & logs transaction)
+// Buy Lease (Deducts strictly from deposit_balance & distributes multi-tier referral bonuses)
 router.post('/buy', verifyToken, async (req, res) => {
   const { plan_name, price, daily_income, duration } = req.body;
   if (!plan_name || !price || !daily_income || !duration) {
@@ -67,11 +67,54 @@ router.post('/buy', verifyToken, async (req, res) => {
       [req.user.id, plan_name, planPrice, daily_income, duration]
     );
 
-    // Log transaction history
+    // Log transaction history for the buyer
     await connection.query(
       'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
       [req.user.id, 'recharge', `Leased ${plan_name}`, -planPrice, 'success']
     );
+
+    // ==========================================
+    // MULTI-TIER REFERRAL COMMISSION PAYOUT
+    // Level 1: 8%, Level 2: 3%, Level 3: 1%
+    // ==========================================
+    const percentages = {
+      1: 0.08,
+      2: 0.03,
+      3: 0.01
+    };
+
+    const [ancestors] = await connection.query(
+      'SELECT ancestor_user_id, level FROM team_referrals WHERE descendant_user_id = ? AND level BETWEEN 1 AND 3',
+      [req.user.id]
+    );
+
+    for (const ancestor of ancestors) {
+      const rate = percentages[ancestor.level];
+      if (rate) {
+        const bonusAmount = planPrice * rate;
+
+        if (bonusAmount > 0) {
+          // Credit ancestor's withdrawable balance
+          await connection.query(
+            'UPDATE users SET balance = balance + ? WHERE id = ?',
+            [bonusAmount, ancestor.ancestor_user_id]
+          );
+
+          // Log transaction for the ancestor
+          await connection.query(
+            'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
+            [
+              ancestor.ancestor_user_id,
+              'earnings',
+              `Level ${ancestor.level} Referral Commission from User #${req.user.id} (${plan_name})`,
+              bonusAmount,
+              'success'
+            ]
+          );
+        }
+      }
+    }
+    // ==========================================
 
     await connection.commit();
     connection.release();
