@@ -243,49 +243,6 @@ router.get('/transactions', verifyToken, async (req, res) => {
   }
 });
 
-// POST Recharge Verification / Success (Ensures recharges log into transactions table)
-router.post('/recharge/success', verifyToken, async (req, res) => {
-  const { amount, reference, channel } = req.body;
-  const userId = req.user.id;
-
-  if (!amount || isNaN(amount) || amount <= 0) {
-    return res.status(400).json({ success: false, message: 'Invalid recharge amount.' });
-  }
-
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-
-    // 1. Update user balance & deposit balance
-    await connection.query(
-      'UPDATE users SET balance = balance + ?, deposit_balance = deposit_balance + ? WHERE id = ?',
-      [amount, amount, userId]
-    );
-
-    // 2. Insert into recharges table
-    await connection.query(
-      `INSERT INTO recharges (user_id, amount, channel, reference, status, created_at) VALUES (?, ?, ?, ?, 'success', NOW())`,
-      [userId, amount, channel || 'Online', reference || 'TXN-' + Date.now()]
-    );
-
-    // 3. Insert into transactions table so it appears in Transaction History
-    await connection.query(
-      `INSERT INTO transactions (user_id, type, description, amount, status, created_at) VALUES (?, 'recharge', ?, ?, 'success', NOW())`,
-      [userId, `Account Recharge via ${channel || 'Online'}`, amount]
-    );
-
-    await connection.commit();
-    connection.release();
-
-    res.json({ success: true, message: 'Recharge successful and recorded!' });
-  } catch (err) {
-    await connection.rollback();
-    connection.release();
-    console.error('Recharge success error:', err);
-    res.status(500).json({ success: false, message: 'Server error processing recharge.' });
-  }
-});
-
 // POST Profile Update
 router.post('/profile', verifyToken, async (req, res) => {
   const { username, email } = req.body;
@@ -353,7 +310,7 @@ const handleFetchTeamMembers = async (req, res) => {
         u.email, 
         u.created_at,
         tr.level,
-        (SELECT COALESCE(SUM(amount), 0) FROM recharges WHERE user_id = u.id AND (status = 'approved' OR status = 'success')) as total_deposited
+        (SELECT COALESCE(SUM(amount), 0) FROM recharges WHERE user_id = u.id AND status = 'approved') as total_deposited
       FROM team_referrals tr
       JOIN users u ON tr.descendant_user_id = u.id
       WHERE tr.ancestor_user_id = ?
