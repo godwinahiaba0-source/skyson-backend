@@ -45,15 +45,32 @@ router.post('/submit', verifyToken, async (req, res) => {
   }
 
   const finalRef = reference || transactionId || ('REC_' + Date.now());
+  const channelName = channel || 'Sky 03 Pay';
+  const userId = req.user.id;
 
+  const connection = await pool.getConnection();
   try {
-    await pool.query(
+    await connection.beginTransaction();
+
+    // 1. Insert into recharges table
+    await connection.query(
       `INSERT INTO recharges (user_id, amount, channel, reference, proof_image, status) VALUES (?, ?, ?, ?, NULL, 'pending')`,
-      [req.user.id, amount, channel || 'Sky 03 Pay', finalRef]
+      [userId, amount, channelName, finalRef]
     );
+
+    // 2. Insert matching record into transactions table so it appears in history
+    await connection.query(
+      `INSERT INTO transactions (user_id, type, description, amount, status, created_at) VALUES (?, 'recharge', ?, ?, 'pending', NOW())`,
+      [userId, `Account Recharge via ${channelName}`, amount]
+    );
+
+    await connection.commit();
+    connection.release();
 
     res.json({ success: true, message: 'Recharge request submitted successfully!' });
   } catch (err) {
+    await connection.rollback();
+    connection.release();
     console.error('Recharge submission error:', err);
     res.status(500).json({ success: false, message: 'Server error processing recharge request.' });
   }
@@ -69,15 +86,32 @@ router.post('/submit-with-proof', verifyToken, upload.single('proofImage'), asyn
   }
 
   const finalRef = transactionId || ('USDT_' + Date.now());
+  const channelName = channel || 'USDT Pay';
+  const userId = req.user.id;
 
+  const connection = await pool.getConnection();
   try {
-    await pool.query(
+    await connection.beginTransaction();
+
+    // 1. Insert into recharges table
+    await connection.query(
       `INSERT INTO recharges (user_id, amount, channel, reference, proof_image, status) VALUES (?, ?, ?, ?, ?, 'pending')`,
-      [req.user.id, amount, channel || 'USDT Pay', finalRef, proofImage]
+      [userId, amount, channelName, finalRef, proofImage]
     );
+
+    // 2. Insert matching record into transactions table so it appears in history
+    await connection.query(
+      `INSERT INTO transactions (user_id, type, description, amount, status, created_at) VALUES (?, 'recharge', ?, ?, 'pending', NOW())`,
+      [userId, `Account Recharge via ${channelName}`, amount]
+    );
+
+    await connection.commit();
+    connection.release();
 
     res.json({ success: true, message: 'USDT deposit proof submitted successfully!' });
   } catch (err) {
+    await connection.rollback();
+    connection.release();
     console.error('USDT recharge submission error:', err);
     res.status(500).json({ success: false, message: 'Server error processing payment proof.' });
   }
