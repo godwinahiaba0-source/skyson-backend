@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('./db');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
 
 // Middleware to verify JWT token
 const verifyToken = (req, res, next) => {
@@ -107,7 +108,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
   }
 });
 
-// POST User Withdrawal Request with Permission & Pending Check
+// POST User Withdrawal Request with Fund Password, Permission & Pending Check
 router.post('/withdraw', verifyToken, async (req, res) => {
   const { amount, fundPassword, channel, accountNumber } = req.body;
   const userId = req.user.id;
@@ -116,12 +117,19 @@ router.post('/withdraw', verifyToken, async (req, res) => {
     return res.status(400).json({ success: false, message: 'Minimum withdrawal amount is GH₵ 50.00.' });
   }
 
+  if (!fundPassword) {
+    return res.status(400).json({ success: false, message: 'Please enter your fund password.' });
+  }
+
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
 
-    // 1. Check user balance and withdrawal permission status
-    const [users] = await connection.query('SELECT balance, can_withdraw FROM users WHERE id = ? FOR UPDATE', [userId]);
+    // 1. Fetch user balance, permissions, and password fields
+    const [users] = await connection.query(
+      'SELECT balance, can_withdraw, fund_password, password FROM users WHERE id = ? FOR UPDATE',
+      [userId]
+    );
     if (users.length === 0) {
       await connection.rollback();
       connection.release();
@@ -147,6 +155,22 @@ router.post('/withdraw', verifyToken, async (req, res) => {
       await connection.rollback();
       connection.release();
       return res.status(400).json({ success: false, message: 'You already have a pending withdrawal request. Please wait for it to be processed.' });
+    }
+
+    // 🛑 STRICT FUND PASSWORD VALIDATION
+    const targetPasswordHash = user.fund_password || user.password;
+    let isPasswordValid = false;
+
+    if (targetPasswordHash && (targetPasswordHash.startsWith('$2b$') || targetPasswordHash.startsWith('$2a$'))) {
+      isPasswordValid = await bcrypt.compare(fundPassword, targetPasswordHash);
+    } else {
+      isPasswordValid = (targetPasswordHash === fundPassword);
+    }
+
+    if (!isPasswordValid) {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({ success: false, message: 'Incorrect fund password.' });
     }
 
     if (user.balance < amount) {
@@ -238,7 +262,6 @@ router.post('/profile', verifyToken, async (req, res) => {
   }
 });
 
-// GET Team Report Statistics
 // GET Team Report Statistics (Fixed Team Withdraw Query)
 router.get('/team/report', verifyToken, async (req, res) => {
   try {
@@ -382,7 +405,7 @@ router.post('/claim-bonus', verifyToken, async (req, res) => {
 
 // POST Update Fund Password (verifying with Account Login Password)
 router.post('/update-fund-password', verifyToken, async (req, res) => {
-  const { currentPassword, newPassword } = req.body; // currentPassword here is actually the Login Password
+  const { currentPassword, newPassword } = req.body;
   const userId = req.user.id;
 
   if (!currentPassword || !newPassword) {
@@ -397,7 +420,7 @@ router.post('/update-fund-password', verifyToken, async (req, res) => {
 
     const user = users[0];
 
-    // 1. Verify against the MAIN ACCOUNT LOGIN PASSWORD
+    // Verify against the MAIN ACCOUNT LOGIN PASSWORD
     let isPasswordValid = false;
     const storedPassword = user.password || user.password_hash;
     
@@ -411,7 +434,7 @@ router.post('/update-fund-password', verifyToken, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Incorrect account login password.' });
     }
 
-    // 2. Save the new fund password (you can hash it or save directly depending on your setup)
+    // Save the new fund password hashed
     const hashedNewPin = await bcrypt.hash(newPassword, 10);
     await pool.query('UPDATE users SET fund_password = ? WHERE id = ?', [hashedNewPin, userId]);
 
@@ -421,4 +444,5 @@ router.post('/update-fund-password', verifyToken, async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error updating fund password.' });
   }
 });
+
 module.exports = router;
