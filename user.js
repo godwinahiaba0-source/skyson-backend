@@ -107,7 +107,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
   }
 });
 
-// POST User Withdrawal Request
+// POST User Withdrawal Request with Permission Check
 router.post('/withdraw', verifyToken, async (req, res) => {
   const { amount, fundPassword, channel, accountNumber } = req.body;
   const userId = req.user.id;
@@ -120,8 +120,8 @@ router.post('/withdraw', verifyToken, async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    // 1. Check user balance
-    const [users] = await connection.query('SELECT balance FROM users WHERE id = ? FOR UPDATE', [userId]);
+    // 1. Check user balance and withdrawal permission status
+    const [users] = await connection.query('SELECT balance, can_withdraw FROM users WHERE id = ? FOR UPDATE', [userId]);
     if (users.length === 0) {
       await connection.rollback();
       connection.release();
@@ -129,6 +129,14 @@ router.post('/withdraw', verifyToken, async (req, res) => {
     }
 
     const user = users[0];
+
+    // Block users with disabled withdrawals
+    if (user.can_withdraw === 0 || user.can_withdraw === false) {
+      await connection.rollback();
+      connection.release();
+      return res.status(403).json({ success: false, message: 'Your withdrawal privileges have been disabled by administration.' });
+    }
+
     if (user.balance < amount) {
       await connection.rollback();
       connection.release();
@@ -164,7 +172,6 @@ router.post('/withdraw', verifyToken, async (req, res) => {
   }
 });
 
-// GET User Transactions (Queries exclusively from the transactions table)
 // GET User Transactions (Synced live with withdrawals & recharges)
 router.get('/transactions', verifyToken, async (req, res) => {
   try {
@@ -357,4 +364,5 @@ router.post('/claim-bonus', verifyToken, async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error processing bonus claim.' });
   }
 });
+
 module.exports = router;
