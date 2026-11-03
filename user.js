@@ -239,6 +239,7 @@ router.post('/profile', verifyToken, async (req, res) => {
 });
 
 // GET Team Report Statistics
+// GET Team Report Statistics (Fixed Team Withdraw Query)
 router.get('/team/report', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -249,19 +250,21 @@ router.get('/team/report', verifyToken, async (req, res) => {
     );
     const teamSize = teamSizeRows[0].count || 0;
 
+    // Team Recharge calculation
     const [rechargeRows] = await pool.query(`
-      SELECT COALESCE(SUM(d.amount), 0) as total_recharge 
-      FROM deposits d
-      JOIN team_referrals tr ON d.user_id = tr.descendant_user_id
-      WHERE tr.ancestor_user_id = ? AND d.status = 'approved'
+      SELECT COALESCE(SUM(r.amount), 0) as total_recharge 
+      FROM recharges r
+      JOIN team_referrals tr ON r.user_id = tr.descendant_user_id
+      WHERE tr.ancestor_user_id = ? AND (r.status = 'approved' OR r.status = 'success')
     `, [userId]);
     const teamRecharge = rechargeRows[0].total_recharge || 0;
 
+    // Team Withdraw calculation (Fixed to include 'success' and 'approved')
     const [withdrawRows] = await pool.query(`
       SELECT COALESCE(SUM(w.amount), 0) as total_withdraw 
       FROM withdrawals w
       JOIN team_referrals tr ON w.user_id = tr.descendant_user_id
-      WHERE tr.ancestor_user_id = ? AND w.status = 'approved'
+      WHERE tr.ancestor_user_id = ? AND (w.status = 'approved' OR w.status = 'success')
     `, [userId]);
     const teamWithdraw = withdrawRows[0].total_withdraw || 0;
 
