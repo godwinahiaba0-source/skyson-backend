@@ -179,4 +179,73 @@ router.post('/login', async (req, res) => {
   }
 });
 
+// POST Update Login Password
+router.post('/update-password', async (req, res) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) return res.status(401).json({ message: 'No token provided.' });
+
+  jwt.verify(token, process.env.JWT_SECRET || 'skyson_secure_super_secret_key_2026', async (err, decoded) => {
+    if (err) return res.status(403).json({ message: 'Invalid or expired token.' });
+
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword || newPassword.length < 8) {
+      return res.status(400).json({ message: 'Please provide current password and a new password (min 8 characters).' });
+    }
+
+    try {
+      const [users] = await pool.query('SELECT * FROM users WHERE id = ?', [decoded.id]);
+      if (users.length === 0) return res.status(404).json({ message: 'User not found.' });
+
+      const user = users[0];
+      const validPass = await bcrypt.compare(currentPassword, user.password);
+      if (!validPass) {
+        return res.status(400).json({ message: 'Incorrect current login password.' });
+      }
+
+      const hashedPass = await bcrypt.hash(newPassword, 10);
+      await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashedPass, user.id]);
+
+      res.json({ success: true, message: 'Login password updated successfully!' });
+    } catch (dbErr) {
+      console.error('Update password error:', dbErr);
+      res.status(500).json({ message: 'Server error updating password.' });
+    }
+  });
+});
+
+// POST Update Fund Password (PIN) using Account Login Password for verification
+router.post('/update-fund-password', async (req, res) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) return res.status(401).json({ message: 'No token provided.' });
+
+  jwt.verify(token, process.env.JWT_SECRET || 'skyson_secure_super_secret_key_2026', async (err, decoded) => {
+    if (err) return res.status(403).json({ message: 'Invalid or expired token.' });
+
+    const { currentPassword, newFundPassword } = req.body;
+    if (!currentPassword || !newFundPassword) {
+      return res.status(400).json({ message: 'Account login password and new PIN are required.' });
+    }
+
+    try {
+      const [users] = await pool.query('SELECT * FROM users WHERE id = ?', [decoded.id]);
+      if (users.length === 0) return res.status(404).json({ message: 'User not found.' });
+
+      const user = users[0];
+      const validPass = await bcrypt.compare(currentPassword, user.password);
+      if (!validPass) {
+        return res.status(400).json({ message: 'Incorrect account login password.' });
+      }
+
+      await pool.query('UPDATE users SET fund_password = ? WHERE id = ?', [newFundPassword, user.id]);
+
+      res.json({ success: true, message: 'Fund password updated successfully!' });
+    } catch (dbErr) {
+      console.error('Update fund password error:', dbErr);
+      res.status(500).json({ message: 'Server error updating fund password.' });
+    }
+  });
+});
+
 module.exports = router;
