@@ -134,7 +134,7 @@ router.post('/withdraw', verifyToken, async (req, res) => {
     if (user.can_withdraw === 0 || user.can_withdraw === false) {
       await connection.rollback();
       connection.release();
-      return res.status(403).json({ success: false, message: 'Your withdrawal privileges have been disabled by administration.' });
+      return res.status(403).json({ success: false, message: 'Withdrawal function not enabled.' });
     }
 
     if (user.balance < amount) {
