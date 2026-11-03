@@ -310,7 +310,7 @@ const handleFetchTeamMembers = async (req, res) => {
         u.email, 
         u.created_at,
         tr.level,
-        (SELECT COALESCE(SUM(amount), 0) FROM recharges WHERE user_id = u.id AND status = 'approved') as total_deposited
+        (SELECT COALESCE(SUM(amount), 0) FROM recharges WHERE user_id = u.id AND (status = 'approved' OR status = 'success')) as total_deposited
       FROM team_referrals tr
       JOIN users u ON tr.descendant_user_id = u.id
       WHERE tr.ancestor_user_id = ?
