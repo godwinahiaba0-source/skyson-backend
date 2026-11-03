@@ -40,8 +40,9 @@ const rechargeRoutes = require('./recharge');
 const walletRoutes = require('./wallet'); 
 const teamRoutes = require('./team'); 
 const adminRoutes = require('./admin'); 
+const fundRoutes = require('./fund'); // ✨ Added Fund Savings Routes
 
-// Mount routes (walletRoutes mounted under /api/user so /api/user/bank-card resolves correctly)
+// Mount routes
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/user', walletRoutes); // Handles /api/user/bank-card and /api/user/
@@ -50,6 +51,7 @@ app.use('/api/lease', leaseRoutes);
 app.use('/api/recharge', rechargeRoutes);
 app.use('/api', teamRoutes); 
 app.use('/api/admin', adminRoutes); 
+app.use('/api/fund', fundRoutes); // ✨ Mounted under /api/fund for savings.html
 
 // ==========================================
 // 3. SERVER STARTUP
