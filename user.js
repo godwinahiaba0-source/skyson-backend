@@ -57,7 +57,6 @@ router.get('/dashboard', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // 1. Fetch user withdrawable balance and lease-only deposit balance
     const [users] = await pool.query(
       'SELECT balance, deposit_balance FROM users WHERE id = ?', 
       [userId]
@@ -66,27 +65,23 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     if (users.length === 0) return res.status(404).json({ message: 'User not found.' });
     const user = users[0];
 
-    // 2. Count active leases
     const [leaseStats] = await pool.query(
       'SELECT COUNT(*) as active_leases FROM leases WHERE user_id = ?',
       [userId]
     );
 
-    // 3. Today's Earnings (Sum of earnings claimed TODAY from transactions)
     const [todayRows] = await pool.query(`
       SELECT COALESCE(SUM(amount), 0) as today_earnings 
       FROM transactions 
       WHERE user_id = ? AND type = 'earnings' AND DATE(created_at) = CURDATE()
     `, [userId]);
 
-    // 4. Yesterday's Earnings (Sum of earnings claimed YESTERDAY from transactions)
     const [yesterdayRows] = await pool.query(`
       SELECT COALESCE(SUM(amount), 0) as yesterday_earnings 
       FROM transactions 
       WHERE user_id = ? AND type = 'earnings' AND DATE(created_at) = CURDATE() - INTERVAL 1 DAY
     `, [userId]);
 
-    // 5. Total Approved Deposits Accumulation
     const [depositRows] = await pool.query(`
       SELECT COALESCE(SUM(amount), 0) as total_approved_deposits 
       FROM recharges 
@@ -95,12 +90,12 @@ router.get('/dashboard', verifyToken, async (req, res) => {
 
     res.json({
       success: true,
-      balance: parseFloat(user.balance || 0), // Withdrawable balance
+      balance: parseFloat(user.balance || 0),
       deposit_balance: parseFloat(user.deposit_balance || 0),
-      totalDeposit: parseFloat(depositRows[0].total_approved_deposits || 0), // Accumulated approved deposits
+      totalDeposit: parseFloat(depositRows[0].total_approved_deposits || 0),
       activeLeases: leaseStats[0].active_leases || 0,
-      todayEarnings: parseFloat(todayRows[0].today_earnings || 0), // Earnings claimed today
-      yesterdayEarnings: parseFloat(yesterdayRows[0].yesterday_earnings || 0) // Earnings claimed yesterday
+      todayEarnings: parseFloat(todayRows[0].today_earnings || 0),
+      yesterdayEarnings: parseFloat(yesterdayRows[0].yesterday_earnings || 0)
     });
   } catch (err) {
     console.error('Dashboard stats error:', err);
@@ -125,7 +120,6 @@ router.post('/withdraw', verifyToken, async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    // 1. Fetch user balance, permissions, and password fields
     const [users] = await connection.query(
       'SELECT balance, can_withdraw, fund_password, password FROM users WHERE id = ? FOR UPDATE',
       [userId]
@@ -138,14 +132,12 @@ router.post('/withdraw', verifyToken, async (req, res) => {
 
     const user = users[0];
 
-    // Block users with disabled withdrawals
     if (user.can_withdraw === 0 || user.can_withdraw === false) {
       await connection.rollback();
       connection.release();
       return res.status(403).json({ success: false, message: 'Withdrawal function not enabled.' });
     }
 
-    // Block users if there is already a pending withdrawal request
     const [pendingWithdrawals] = await connection.query(
       'SELECT id FROM withdrawals WHERE user_id = ? AND status = "pending"',
       [userId]
@@ -154,10 +146,9 @@ router.post('/withdraw', verifyToken, async (req, res) => {
     if (pendingWithdrawals.length > 0) {
       await connection.rollback();
       connection.release();
-      return res.status(400).json({ success: false, message: 'You already have a pending withdrawal request. Please wait for it to be processed.' });
+      return res.status(400).json({ success: false, message: 'You already have a pending withdrawal request.' });
     }
 
-    // 🛑 STRICT FUND PASSWORD VALIDATION
     const targetPasswordHash = user.fund_password || user.password;
     let isPasswordValid = false;
 
@@ -179,7 +170,6 @@ router.post('/withdraw', verifyToken, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Insufficient balance for withdrawal.' });
     }
 
-    // 2. Deduct balance and insert withdrawal record
     const fee = amount * 0.10;
     const netAmount = amount - fee;
 
@@ -190,7 +180,6 @@ router.post('/withdraw', verifyToken, async (req, res) => {
       [userId, amount, fee, netAmount, channel || 'MTN', accountNumber || 'N/A']
     );
 
-    // 3. Record transaction
     await connection.query(
       `INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, 'withdrawal', ?, ?, 'pending')`,
       [userId, `Withdrawal via ${channel || 'MTN'}`, amount]
@@ -208,24 +197,21 @@ router.post('/withdraw', verifyToken, async (req, res) => {
   }
 });
 
-// GET User Transactions (Synced live with withdrawals & recharges)
+// GET User Transactions
 router.get('/transactions', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // 1. Fetch raw transaction records
     const [records] = await pool.query(
       'SELECT id, type, description, amount, status, created_at as date FROM transactions WHERE user_id = ? ORDER BY created_at DESC',
       [userId]
     );
 
-    // 2. Fetch live withdrawal statuses to ensure sync
     const [withdrawals] = await pool.query(
       'SELECT id, amount, status, created_at FROM withdrawals WHERE user_id = ?',
       [userId]
     );
 
-    // Map live withdrawal statuses over transaction records if they match
     const syncedRecords = records.map(tx => {
       if (tx.type === 'withdrawal') {
         const match = withdrawals.find(w => Number(w.amount) === Number(tx.amount) && Math.abs(new Date(w.created_at) - new Date(tx.date)) < 120000);
@@ -262,7 +248,7 @@ router.post('/profile', verifyToken, async (req, res) => {
   }
 });
 
-// GET Team Report Statistics (Fixed Team Withdraw Query)
+// GET Team Report Statistics
 router.get('/team/report', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -273,7 +259,6 @@ router.get('/team/report', verifyToken, async (req, res) => {
     );
     const teamSize = teamSizeRows[0].count || 0;
 
-    // Team Recharge calculation
     const [rechargeRows] = await pool.query(`
       SELECT COALESCE(SUM(r.amount), 0) as total_recharge 
       FROM recharges r
@@ -282,7 +267,6 @@ router.get('/team/report', verifyToken, async (req, res) => {
     `, [userId]);
     const teamRecharge = rechargeRows[0].total_recharge || 0;
 
-    // Team Withdraw calculation (Fixed to include 'success' and 'approved')
     const [withdrawRows] = await pool.query(`
       SELECT COALESCE(SUM(w.amount), 0) as total_withdraw 
       FROM withdrawals w
@@ -305,11 +289,8 @@ router.get('/team/report', verifyToken, async (req, res) => {
   }
 });
 
-// Shared handler for fetching team members with debugging logs
 const handleFetchTeamMembers = async (req, res) => {
   try {
-    console.log(`[TEAM DEBUG] Fetching team members for logged-in User ID: ${req.user.id}`);
-
     const [members] = await pool.query(`
       SELECT 
         u.id as user_id, 
@@ -324,7 +305,6 @@ const handleFetchTeamMembers = async (req, res) => {
       ORDER BY tr.level ASC, u.created_at DESC
     `, [req.user.id]);
 
-    console.log(`[TEAM DEBUG] Found ${members.length} downline members for User ID ${req.user.id}`);
     res.json({ success: true, members });
   } catch (err) {
     console.error('Fetch team members error:', err);
@@ -350,7 +330,6 @@ router.post('/claim-bonus', verifyToken, async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    // 1. Check if bonus code exists and lock row
     const [codes] = await connection.query(
       'SELECT * FROM bonus_codes WHERE code = ? FOR UPDATE',
       [cleanCode]
@@ -364,7 +343,6 @@ router.post('/claim-bonus', verifyToken, async (req, res) => {
 
     const bonus = codes[0];
 
-    // 2. Ensure single-use enforcement
     if (bonus.status === 'claimed') {
       await connection.rollback();
       connection.release();
@@ -373,19 +351,16 @@ router.post('/claim-bonus', verifyToken, async (req, res) => {
 
     const bonusAmount = parseFloat(bonus.amount);
 
-    // 3. Mark code as claimed
     await connection.query(
       'UPDATE bonus_codes SET status = "claimed", claimed_by = ?, claimed_at = NOW() WHERE id = ?',
       [userId, bonus.id]
     );
 
-    // 4. Credit user's withdrawable balance
     await connection.query(
       'UPDATE users SET balance = balance + ? WHERE id = ?',
       [bonusAmount, userId]
     );
 
-    // 5. Log in transaction history (shows up green as an earning)
     await connection.query(
       `INSERT INTO transactions (user_id, type, description, amount, status, created_at) VALUES (?, 'earnings', ?, ?, 'success', NOW())`,
       [userId, `Bonus Code Claimed (${cleanCode})`, bonusAmount]
@@ -403,7 +378,7 @@ router.post('/claim-bonus', verifyToken, async (req, res) => {
   }
 });
 
-// POST Update Fund Password (verifying with Account Login Password)
+// POST Update Fund Password
 router.post('/update-fund-password', verifyToken, async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   const userId = req.user.id;
@@ -419,8 +394,6 @@ router.post('/update-fund-password', verifyToken, async (req, res) => {
     }
 
     const user = users[0];
-
-    // Verify against the MAIN ACCOUNT LOGIN PASSWORD
     let isPasswordValid = false;
     const storedPassword = user.password || user.password_hash;
     
@@ -434,7 +407,6 @@ router.post('/update-fund-password', verifyToken, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Incorrect account login password.' });
     }
 
-    // Save the new fund password hashed
     const hashedNewPin = await bcrypt.hash(newPassword, 10);
     await pool.query('UPDATE users SET fund_password = ? WHERE id = ?', [hashedNewPin, userId]);
 
@@ -445,116 +417,7 @@ router.post('/update-fund-password', verifyToken, async (req, res) => {
   }
 });
 
-// GET Fund Summary & Active Investments
-router.get('/fund/summary', verifyToken, async (tokenReq, res) => {
-  const userId = tokenReq.user.id;
-  try {
-    // 1. Calculate total active invested amount
-    const [activeRows] = await pool.query(
-      'SELECT COALESCE(SUM(amount), 0) as totalActive FROM fund_investments WHERE user_id = ? AND status = "active"',
-      [userId]
-    );
-    const totalActive = parseFloat(activeRows[0].totalActive || 0);
-
-    // 2. Calculate today's earnings from fund investments (if any)
-    const [earningRows] = await pool.query(`
-      SELECT COALESCE(SUM(amount * (daily_profit_percent / 100)), 0) as todayEarnings 
-      FROM fund_investments 
-      WHERE user_id = ? AND status = 'active'
-    `, [userId]);
-    const todayEarnings = parseFloat(earningRows[0].todayEarnings || 0);
-
-    // 3. Fetch list of investments for records modal
-    const [investments] = await pool.query(
-      'SELECT * FROM fund_investments WHERE user_id = ? ORDER BY created_at DESC',
-      [userId]
-    );
-
-    res.json({
-      success: true,
-      totalActive,
-      todayEarnings,
-      investments
-    });
-  } catch (err) {
-    console.error('Fund summary error:', err);
-    res.status(500).json({ success: false, message: 'Failed to fetch fund summary.' });
-  }
-});
-
-// POST Submit New Fund Investment
-router.post('/fund/invest', verifyToken, async (req, res) => {
-  const { planId, amount } = req.body;
-  const userId = req.user.id;
-
-  const parsedAmount = parseFloat(amount);
-  if (!parsedAmount || isNaN(parsedAmount) || parsedAmount < 50) {
-    return res.status(400).json({ success: false, message: 'Minimum investment amount is GH₵ 50.00.' });
-  }
-
-  // Define plans mapping matching savings.html
-  const plans = {
-    1: { name: '3 Days Cycle', days: 3, profitPercent: 2.0, min: 50 },
-    2: { name: '7 Days Cycle', days: 7, profitPercent: 5.0, min: 100 },
-    3: { name: '200 Days Cycle', days: 200, profitPercent: 250.0, min: 1000 }
-  };
-
-  const plan = plans[planId];
-  if (!plan) {
-    return res.status(400).json({ success: false, message: 'Invalid investment plan selected.' });
-  }
-
-  if (parsedAmount < plan.min) {
-    return res.status(400).json({ success: false, message: `Minimum investment for ${plan.name} is GH₵ ${plan.min.toFixed(2)}` });
-  }
-
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-
-    // 1. Check user balance
-    const [users] = await connection.query('SELECT balance FROM users WHERE id = ? FOR UPDATE', [userId]);
-    if (users.length === 0) {
-      await connection.rollback();
-      connection.release();
-      return res.status(404).json({ success: false, message: 'User not found.' });
-    }
-
-    const userBalance = parseFloat(users[0].balance || 0);
-    if (userBalance < parsedAmount) {
-      await connection.rollback();
-      connection.release();
-      return res.status(400).json({ success: false, message: 'Insufficient balance for investment.' });
-    }
-
-    // 2. Deduct user balance
-    await connection.query('UPDATE users SET balance = balance - ? WHERE id = ?', [parsedAmount, userId]);
-
-    // 3. Insert fund investment record
-    await connection.query(
-      `INSERT INTO fund_investments (user_id, plan_id, amount, daily_profit_percent, duration_days, status) VALUES (?, ?, ?, ?, ?, 'active')`,
-      [userId, planId, parsedAmount, plan.profitPercent, plan.days]
-    );
-
-    // 4. Log transaction
-    await connection.query(
-      `INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, 'investment', ?, ?, 'success')`,
-      [userId, `Fund Investment (${plan.name})`, parsedAmount]
-    );
-
-    await connection.commit();
-    connection.release();
-
-    res.json({ success: true, message: 'Investment submitted successfully!' });
-  } catch (err) {
-    await connection.rollback();
-    connection.release();
-    console.error('Fund investment error:', err);
-    res.status(500).json({ success: false, message: 'Server error processing investment.' });
-  }
-});
-
-// GET Fund Summary & Active Investments
+// GET Fund Summary & Active Investments (Linked to wealth_plans table)
 router.get('/fund/summary', verifyToken, async (req, res) => {
   const userId = req.user.id;
   try {
@@ -565,14 +428,15 @@ router.get('/fund/summary', verifyToken, async (req, res) => {
     const totalActive = parseFloat(activeRows[0].totalActive || 0);
 
     const [earningRows] = await pool.query(`
-      SELECT COALESCE(SUM(amount * (daily_profit_percent / 100)), 0) as todayEarnings 
-      FROM fund_investments 
-      WHERE user_id = ? AND status = 'active'
+      SELECT COALESCE(SUM(fi.amount * (wp.daily_profit_percentage / 100)), 0) as todayEarnings 
+      FROM fund_investments fi
+      JOIN wealth_plans wp ON fi.plan_id = wp.plan_id
+      WHERE fi.user_id = ? AND fi.status = 'active'
     `, [userId]);
     const todayEarnings = parseFloat(earningRows[0].todayEarnings || 0);
 
     const [investments] = await pool.query(
-      'SELECT * FROM fund_investments WHERE user_id = ? ORDER BY created_at DESC',
+      'SELECT fi.*, wp.plan_name FROM fund_investments fi LEFT JOIN wealth_plans wp ON fi.plan_id = wp.plan_id WHERE fi.user_id = ? ORDER BY fi.created_at DESC',
       [userId]
     );
 
@@ -583,7 +447,7 @@ router.get('/fund/summary', verifyToken, async (req, res) => {
   }
 });
 
-// POST Submit New Fund Investment
+// POST Submit New Fund Investment (Linked to wealth_plans table)
 router.post('/fund/invest', verifyToken, async (req, res) => {
   const { planId, amount } = req.body;
   const userId = req.user.id;
@@ -593,24 +457,25 @@ router.post('/fund/invest', verifyToken, async (req, res) => {
     return res.status(400).json({ success: false, message: 'Minimum investment amount is GH₵ 50.00.' });
   }
 
-  const plans = {
-    1: { name: '3 Days Cycle', days: 3, profitPercent: 2.0, min: 50 },
-    2: { name: '7 Days Cycle', days: 7, profitPercent: 5.0, min: 100 },
-    3: { name: '200 Days Cycle', days: 200, profitPercent: 250.0, min: 1000 }
-  };
-
-  const plan = plans[planId];
-  if (!plan) {
-    return res.status(400).json({ success: false, message: 'Invalid investment plan selected.' });
-  }
-
-  if (parsedAmount < plan.min) {
-    return res.status(400).json({ success: false, message: `Minimum investment for ${plan.name} is GH₵ ${plan.min.toFixed(2)}` });
-  }
-
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
+
+    const [plans] = await connection.query('SELECT * FROM wealth_plans WHERE plan_id = ?', [planId]);
+    if (plans.length === 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({ success: false, message: 'Invalid investment plan selected.' });
+    }
+
+    const plan = plans[0];
+    const minAmt = parseFloat(plan.min_amount || 50);
+
+    if (parsedAmount < minAmt) {
+      await connection.rollback();
+      connection.release();
+      return res.status(400).json({ success: false, message: `Minimum investment for ${plan.plan_name} is GH₵ ${minAmt.toFixed(2)}` });
+    }
 
     const [users] = await connection.query('SELECT balance FROM users WHERE id = ? FOR UPDATE', [userId]);
     if (users.length === 0) {
@@ -629,13 +494,13 @@ router.post('/fund/invest', verifyToken, async (req, res) => {
     await connection.query('UPDATE users SET balance = balance - ? WHERE id = ?', [parsedAmount, userId]);
 
     await connection.query(
-      `INSERT INTO fund_investments (user_id, plan_id, amount, daily_profit_percent, duration_days, status) VALUES (?, ?, ?, ?, ?, 'active')`,
-      [userId, planId, parsedAmount, plan.profitPercent, plan.days]
+      `INSERT INTO fund_investments (user_id, plan_id, amount, status) VALUES (?, ?, ?, 'active')`,
+      [userId, planId, parsedAmount]
     );
 
     await connection.query(
       `INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, 'investment', ?, ?, 'success')`,
-      [userId, `Fund Investment (${plan.name})`, parsedAmount]
+      [userId, `Fund Investment (${plan.plan_name})`, parsedAmount]
     );
 
     await connection.commit();
