@@ -209,10 +209,11 @@ router.post('/recharge/action', verifyAdmin, async (req, res) => {
     await connection.query('UPDATE recharges SET status = ? WHERE id = ?', [rechargeStatus, rechargeId]);
 
     // 2. Credit deposit balance and general user balance upon approval
+    // 2. Credit ONLY deposit balance upon recharge approval (not withdrawable balance)
     if (action === 'approved') {
       await connection.query(
-        'UPDATE users SET balance = balance + ?, deposit_balance = deposit_balance + ? WHERE id = ?',
-        [recharge.amount, recharge.amount, recharge.user_id]
+        'UPDATE users SET deposit_balance = deposit_balance + ? WHERE id = ?',
+        [recharge.amount, recharge.user_id]
       );
     }
 
