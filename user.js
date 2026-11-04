@@ -52,7 +52,7 @@ router.get('/profile', verifyToken, async (req, res) => {
   }
 });
 
-// Dashboard Route
+// Dashboard Route (Live dynamic tracking for Today's, Yesterday's, Total Deposits & Balance)
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -103,19 +103,23 @@ router.get('/dashboard', verifyToken, async (req, res) => {
   }
 });
 
-// POST User Withdrawal Request
+// POST User Withdrawal Request (Weekend Block, Active Lease Check, Fund Password & Limits)
 router.post('/withdraw', verifyToken, async (req, res) => {
   const { amount, fundPassword, channel, accountNumber } = req.body;
   const userId = req.user.id;
 
+  // ==========================================
+  // 1. WEEKEND WITHDRAWAL RESTRICTION CHECK (Sat & Sun)
+  // ==========================================
   const today = new Date();
-  const dayOfWeek = today.getDay();
+  const dayOfWeek = today.getDay(); // 0 is Sunday, 6 is Saturday
   if (dayOfWeek === 0 || dayOfWeek === 6) {
     return res.status(400).json({ 
       success: false, 
       message: 'Withdrawals are closed on weekends (Saturdays and Sundays). Please submit your withdrawal request on a weekday.' 
     });
   }
+  // ==========================================
 
   if (!amount || isNaN(amount) || amount < 50) {
     return res.status(400).json({ success: false, message: 'Minimum withdrawal amount is GH₵ 50.00.' });
@@ -129,6 +133,7 @@ router.post('/withdraw', verifyToken, async (req, res) => {
   try {
     await connection.beginTransaction();
 
+    // 2. Check if user has an active leased equipment (Account activation check)
     const [activeLeases] = await connection.query(
       'SELECT id FROM leases WHERE user_id = ?',
       [userId]
@@ -220,14 +225,17 @@ router.post('/withdraw', verifyToken, async (req, res) => {
   }
 });
 
-// GET User Transactions
+// GET User Transactions (Direct, reliable sync from transactions table)
 router.get('/transactions', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
+
+    // Fetch all transaction records directly ordered by newest first
     const [records] = await pool.query(
       'SELECT id, type, description, amount, status, created_at as date FROM transactions WHERE user_id = ? ORDER BY created_at DESC',
       [userId]
     );
+
     res.json({ success: true, records });
   } catch (err) {
     console.error('Fetch transactions error:', err);
@@ -252,7 +260,7 @@ router.post('/profile', verifyToken, async (req, res) => {
   }
 });
 
-// GET Team Report Statistics (Evaluates both approved & success safely)
+// GET Team Report Statistics
 router.get('/team/report', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -421,7 +429,7 @@ router.post('/update-fund-password', verifyToken, async (req, res) => {
   }
 });
 
-// GET Fund Summary & Active Investments
+// GET Fund Summary & Active Investments (Linked to wealth_plans table)
 router.get('/fund/summary', verifyToken, async (req, res) => {
   const userId = req.user.id;
   try {
@@ -451,7 +459,7 @@ router.get('/fund/summary', verifyToken, async (req, res) => {
   }
 });
 
-// POST Submit New Fund Investment
+// POST Submit New Fund Investment (Aligned with your exact table schema)
 router.post('/fund/invest', verifyToken, async (req, res) => {
   const { planId, amount } = req.body;
   const userId = req.user.id;
@@ -465,6 +473,7 @@ router.post('/fund/invest', verifyToken, async (req, res) => {
   try {
     await connection.beginTransaction();
 
+    // 1. Fetch plan from wealth_plans table
     const [plans] = await connection.query('SELECT * FROM wealth_plans WHERE plan_id = ?', [planId]);
     if (plans.length === 0) {
       await connection.rollback();
@@ -481,6 +490,7 @@ router.post('/fund/invest', verifyToken, async (req, res) => {
       return res.status(400).json({ success: false, message: `Minimum investment for ${plan.plan_name} is GH₵ ${minAmt.toFixed(2)}` });
     }
 
+    // 2. Check user balance
     const [users] = await connection.query('SELECT balance FROM users WHERE id = ? FOR UPDATE', [userId]);
     if (users.length === 0) {
       await connection.rollback();
@@ -495,17 +505,21 @@ router.post('/fund/invest', verifyToken, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Insufficient balance for investment.' });
     }
 
+    // 3. Calculate return based on your table columns
     const days = parseInt(plan.duration_days || plan.days || 3);
     const profitPercent = parseFloat(plan.daily_profit_percentage || plan.profit_percent || 2.0);
     const totalReturn = parsedAmount + (parsedAmount * (profitPercent / 100) * days);
 
+    // 4. Deduct user balance
     await connection.query('UPDATE users SET balance = balance - ? WHERE id = ?', [parsedAmount, userId]);
 
+    // 5. Insert matching your exact table columns: plan_name, amount, days, profit_percent, total_return
     await connection.query(
       `INSERT INTO fund_investments (user_id, plan_id, plan_name, amount, days, profit_percent, total_return, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`,
       [userId, planId, plan.plan_name, parsedAmount, days, profitPercent, totalReturn]
     );
 
+    // 6. Log transaction
     await connection.query(
       `INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, 'investment', ?, ?, 'success')`,
       [userId, `Fund Investment (${plan.plan_name})`, parsedAmount]
