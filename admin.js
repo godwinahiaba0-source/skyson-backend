@@ -191,51 +191,29 @@ router.get('/recharges', verifyAdmin, async (req, res) => {
 });
 
 // POST Approve or Reject Recharge
-// POST Approve or Reject Recharge
 router.post('/recharge/action', verifyAdmin, async (req, res) => {
-  const { rechargeId, action } = req.body; // action can be 'approved' or 'rejected'
+  const { rechargeId, action } = req.body;
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-
     const [recharges] = await connection.query('SELECT * FROM recharges WHERE id = ? FOR UPDATE', [rechargeId]);
     if (recharges.length === 0) {
       await connection.rollback();
       connection.release();
       return res.status(404).json({ success: false, message: 'Recharge not found.' });
     }
-
     const recharge = recharges[0];
-    const newStatus = (action === 'approved') ? 'success' : 'rejected';
+    await connection.query('UPDATE recharges SET status = ? WHERE id = ?', [action, rechargeId]);
 
-    // 1. Update recharges table status
-    await connection.query('UPDATE recharges SET status = ? WHERE id = ?', [newStatus, rechargeId]);
-
-    // 2. If approved, credit deposit balance and update user balance
     if (action === 'approved') {
-      await connection.query(
-        'UPDATE users SET balance = balance + ?, deposit_balance = deposit_balance + ? WHERE id = ?',
-        [recharge.amount, recharge.amount, recharge.user_id]
-      );
+      await connection.query('UPDATE users SET deposit_balance = deposit_balance + ? WHERE id = ?', [recharge.amount, recharge.user_id]);
     }
-
-    // 3. Update the exact matching transaction record based on user, amount, and close timestamp
-    await connection.query(
-      `UPDATE transactions 
-       SET status = ? 
-       WHERE user_id = ? AND type = 'recharge' AND amount = ? AND status = 'pending' 
-       ORDER BY ABS(TIMESTAMPDIFF(SECOND, created_at, ?)) ASC 
-       LIMIT 1`,
-      [newStatus, recharge.user_id, recharge.amount, recharge.created_at]
-    );
-
     await connection.commit();
     connection.release();
-    res.json({ success: true, message: `Recharge ${action} successfully!` });
+    res.json({ success: true, message: `Recharge ${action}!` });
   } catch (err) {
     await connection.rollback();
     connection.release();
-    console.error('Recharge action error:', err);
     res.status(500).json({ success: false, message: 'Server error processing recharge.' });
   }
 });
