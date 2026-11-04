@@ -63,8 +63,8 @@ router.get('/stats', verifyAdmin, async (req, res) => {
   try {
     const [usersCount] = await pool.query('SELECT COUNT(*) as total FROM users');
     const [leasesCount] = await pool.query('SELECT COUNT(*) as total FROM leases');
-    const [totalRecharged] = await pool.query('SELECT COALESCE(SUM(amount), 0) as total FROM recharges WHERE status = "approved"');
-    const [totalWithdrawn] = await pool.query('SELECT COALESCE(SUM(amount), 0) as total FROM withdrawals WHERE status = "approved"');
+    const [totalRecharged] = await pool.query('SELECT COALESCE(SUM(amount), 0) as total FROM recharges WHERE status = "approved" OR status = "success"');
+    const [totalWithdrawn] = await pool.query('SELECT COALESCE(SUM(amount), 0) as total FROM withdrawals WHERE status = "approved" OR status = "success"');
 
     res.json({
       success: true,
@@ -81,7 +81,6 @@ router.get('/stats', verifyAdmin, async (req, res) => {
   }
 });
 
-// GET All Users with inviter resolution via team_referrals table (No VIP level)
 // GET All Users with team size count and inviter resolution
 router.get('/users', verifyAdmin, async (req, res) => {
   try {
@@ -106,7 +105,6 @@ router.get('/users', verifyAdmin, async (req, res) => {
 });
 
 // POST Toggle User Withdrawal Permission
-// POST Toggle User Withdrawal Permission
 router.post('/users/toggle-withdrawal', verifyAdmin, async (req, res) => {
   const { userId, enabled } = req.body;
   try {
@@ -120,7 +118,7 @@ router.post('/users/toggle-withdrawal', verifyAdmin, async (req, res) => {
 
 // POST Soft Delete or Restore User Account
 router.post('/users/action', verifyAdmin, async (req, res) => {
-  const { userId, action } = req.body; // action can be 'delete' or 'restore'
+  const { userId, action } = req.body;
   try {
     const isDeleted = action === 'delete' ? 1 : 0;
     const statusStr = action === 'delete' ? 'deleted' : 'active';
@@ -133,7 +131,7 @@ router.post('/users/action', verifyAdmin, async (req, res) => {
   }
 });
 
-// POST Reset Bound Payment Account (Bank Card) via username or user ID
+// POST Reset Bound Payment Account (Bank Card)
 router.post('/bankcard/reset', verifyAdmin, async (req, res) => {
   const { userId, username } = req.body;
   try {
@@ -155,7 +153,7 @@ router.post('/bankcard/reset', verifyAdmin, async (req, res) => {
   }
 });
 
-// GET User Downline Referral Tree using team_referrals table
+// GET User Downline Referral Tree
 router.get('/users/:id/referrals', verifyAdmin, async (req, res) => {
   const userId = req.params.id;
   try {
@@ -192,28 +190,50 @@ router.get('/recharges', verifyAdmin, async (req, res) => {
 
 // POST Approve or Reject Recharge
 router.post('/recharge/action', verifyAdmin, async (req, res) => {
-  const { rechargeId, action } = req.body;
+  const { rechargeId, action } = req.body; // action can be 'approved' or 'rejected'
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
+
     const [recharges] = await connection.query('SELECT * FROM recharges WHERE id = ? FOR UPDATE', [rechargeId]);
     if (recharges.length === 0) {
       await connection.rollback();
       connection.release();
       return res.status(404).json({ success: false, message: 'Recharge not found.' });
     }
-    const recharge = recharges[0];
-    await connection.query('UPDATE recharges SET status = ? WHERE id = ?', [action, rechargeId]);
 
+    const recharge = recharges[0];
+    
+    // 1. Keep 'approved' in recharges table so Admin Panel displays APPROVED
+    const rechargeStatus = (action === 'approved') ? 'approved' : 'rejected';
+    await connection.query('UPDATE recharges SET status = ? WHERE id = ?', [rechargeStatus, rechargeId]);
+
+    // 2. Credit deposit balance and general user balance upon approval
     if (action === 'approved') {
-      await connection.query('UPDATE users SET deposit_balance = deposit_balance + ? WHERE id = ?', [recharge.amount, recharge.user_id]);
+      await connection.query(
+        'UPDATE users SET balance = balance + ?, deposit_balance = deposit_balance + ? WHERE id = ?',
+        [recharge.amount, recharge.amount, recharge.user_id]
+      );
     }
+
+    // 3. Mark transactions table as 'success' (for green badge on User side)
+    const txStatus = (action === 'approved') ? 'success' : 'rejected';
+    await connection.query(
+      `UPDATE transactions 
+       SET status = ? 
+       WHERE user_id = ? AND type = 'recharge' AND amount = ? AND status = 'pending' 
+       ORDER BY ABS(TIMESTAMPDIFF(SECOND, created_at, ?)) ASC 
+       LIMIT 1`,
+      [txStatus, recharge.user_id, recharge.amount, recharge.created_at]
+    );
+
     await connection.commit();
     connection.release();
-    res.json({ success: true, message: `Recharge ${action}!` });
+    res.json({ success: true, message: `Recharge ${action} successfully!` });
   } catch (err) {
     await connection.rollback();
     connection.release();
+    console.error('Recharge action error:', err);
     res.status(500).json({ success: false, message: 'Server error processing recharge.' });
   }
 });
@@ -235,9 +255,9 @@ router.get('/withdrawals', verifyAdmin, async (req, res) => {
   }
 });
 
-// POST Approve or Reject Withdrawal with Unified Ledger Sync
+// POST Approve or Reject Withdrawal
 router.post('/withdrawal/action', verifyAdmin, async (req, res) => {
-  const { withdrawalId, action } = req.body; // 'approved' or 'rejected'
+  const { withdrawalId, action } = req.body;
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
@@ -251,17 +271,14 @@ router.post('/withdrawal/action', verifyAdmin, async (req, res) => {
     
     const withdrawal = withdrawals[0];
     
-    // 1. Update withdrawals table status
     await connection.query('UPDATE withdrawals SET status = ? WHERE id = ?', [action, withdrawalId]);
 
-    // 2. Update matching record in the transactions table so user UI reflects it instantly
     const mappedStatus = action === 'approved' ? 'success' : 'rejected';
     await connection.query(
       'UPDATE transactions SET status = ? WHERE user_id = ? AND type = "withdrawal" AND amount = ? AND status = "pending" ORDER BY created_at DESC LIMIT 1',
       [mappedStatus, withdrawal.user_id, withdrawal.amount]
     );
 
-    // 3. If rejected, refund the amount back to the user's balance
     if (action === 'rejected') {
       await connection.query('UPDATE users SET balance = balance + ? WHERE id = ?', [withdrawal.amount, withdrawal.user_id]);
     }
@@ -277,7 +294,7 @@ router.post('/withdrawal/action', verifyAdmin, async (req, res) => {
   }
 });
 
-// POST Manual Balance Adjustment with Transaction Ledger Recording
+// POST Manual Balance Adjustment
 router.post('/users/balance', verifyAdmin, async (req, res) => {
   const { username, balanceType, type, amount } = req.body;
   const field = balanceType === 'deposit_balance' ? 'deposit_balance' : 'balance';
@@ -297,10 +314,8 @@ router.post('/users/balance', verifyAdmin, async (req, res) => {
     
     const targetUserId = users[0].id;
 
-    // 1. Update user balance
     await connection.query(`UPDATE users SET ${field} = ${field} + ? WHERE id = ?`, [changeAmt, targetUserId]);
 
-    // 2. Log transaction in the master ledger so it displays in user transaction history
     const txType = balanceType === 'deposit_balance' ? 'recharge' : 'earnings';
     const description = `Admin Manual ${type === 'add' ? 'Credit' : 'Debit'} (${balanceType.replace('_', ' ')})`;
     const recordAmount = type === 'add' ? numericAmount : -numericAmount;
@@ -388,7 +403,7 @@ router.post('/bonus-codes/delete', verifyAdmin, async (req, res) => {
   }
 });
 
-// POST Admin Impersonate / Login as User
+// POST Admin Impersonate
 router.post('/users/impersonate', verifyAdmin, async (req, res) => {
   const { userId } = req.body;
   
@@ -404,7 +419,6 @@ router.post('/users/impersonate', verifyAdmin, async (req, res) => {
 
     const user = users[0];
 
-    // Generate a standard user session token
     const token = jwt.sign(
       { id: user.id, username: user.username, email: user.email },
       process.env.JWT_SECRET || 'skyson_secure_super_secret_key_2026',
