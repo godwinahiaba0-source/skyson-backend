@@ -16,20 +16,23 @@ const verifyToken = (req, res, next) => {
   });
 };
 
-// Helper function to auto-distribute accumulated 24-hour daily earnings for a user
+// Helper function to auto-distribute daily earnings exactly once per 24 hours
 async function processUserEarnings(userId, connection) {
   // Fetch active leases for the user
   const [leases] = await connection.query('SELECT * FROM leases WHERE user_id = ? FOR UPDATE', [userId]);
 
   for (const lease of leases) {
-    let lastClaim = new Date(lease.last_claim_time);
+    if (!lease.last_claim_time) continue;
+
+    const lastClaim = new Date(lease.last_claim_time);
     const now = new Date();
     const dailyIncome = parseFloat(lease.daily_income);
 
-    // Calculate how many 24-hour blocks have passed since last claim
-    let hoursPassed = (now - lastClaim) / (1000 * 60 * 60);
+    // Calculate hours passed since last claim
+    const hoursPassed = (now - lastClaim) / (1000 * 60 * 60);
 
-    while (hoursPassed >= 24) {
+    // Credit ONLY ONCE if 24 hours have passed
+    if (hoursPassed >= 24) {
       // 1. Add daily income directly to withdrawable balance
       await connection.query('UPDATE users SET balance = balance + ? WHERE id = ?', [dailyIncome, userId]);
 
@@ -39,12 +42,8 @@ async function processUserEarnings(userId, connection) {
         [userId, 'earnings', `Automated Daily Income (${lease.plan_name})`, dailyIncome, 'success']
       );
 
-      // 3. Advance last_claim_time by 24 hours
-      lastClaim = new Date(lastClaim.getTime() + (24 * 60 * 60 * 1000));
-      await connection.query('UPDATE leases SET last_claim_time = ? WHERE id = ?', [lastClaim, lease.id]);
-
-      // Recalculate remaining hours
-      hoursPassed = (now - lastClaim) / (1000 * 60 * 60);
+      // 3. Update last_claim_time to NOW() so it won't trigger again for another 24 hours
+      await connection.query('UPDATE leases SET last_claim_time = NOW() WHERE id = ?', [lease.id]);
     }
   }
 }
@@ -161,13 +160,13 @@ router.post('/buy', verifyToken, async (req, res) => {
   }
 });
 
-// Get My Leases (Automatically checks and processes any accumulated 24-hour automated earnings first)
+// Get My Leases (Automatically checks and processes daily earnings strictly once per 24h)
 router.get('/my-leases', verifyToken, async (req, res) => {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
 
-    // Automatically process any pending daily earnings for this user
+    // Automatically process pending daily earnings once per 24 hours
     await processUserEarnings(req.user.id, connection);
 
     await connection.commit();
