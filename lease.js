@@ -16,38 +16,6 @@ const verifyToken = (req, res, next) => {
   });
 };
 
-// Helper function to auto-distribute daily earnings exactly once per 24 hours
-async function processUserEarnings(userId, connection) {
-  // Fetch active leases for the user
-  const [leases] = await connection.query('SELECT * FROM leases WHERE user_id = ? FOR UPDATE', [userId]);
-
-  for (const lease of leases) {
-    if (!lease.last_claim_time) continue;
-
-    const lastClaim = new Date(lease.last_claim_time);
-    const now = new Date();
-    const dailyIncome = parseFloat(lease.daily_income);
-
-    // Calculate hours passed since last claim
-    const hoursPassed = (now - lastClaim) / (1000 * 60 * 60);
-
-    // Credit ONLY ONCE if 24 hours have passed
-    if (hoursPassed >= 24) {
-      // 1. Add daily income directly to withdrawable balance
-      await connection.query('UPDATE users SET balance = balance + ? WHERE id = ?', [dailyIncome, userId]);
-
-      // 2. Log transaction history for automated earnings
-      await connection.query(
-        'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
-        [userId, 'earnings', `Automated Daily Income (${lease.plan_name})`, dailyIncome, 'success']
-      );
-
-      // 3. Update last_claim_time to NOW() so it won't trigger again for another 24 hours
-      await connection.query('UPDATE leases SET last_claim_time = NOW() WHERE id = ?', [lease.id]);
-    }
-  }
-}
-
 // Buy Lease (Deducts strictly from deposit_balance & distributes multi-tier referral bonuses)
 router.post('/buy', verifyToken, async (req, res) => {
   const { plan_name, price, daily_income, duration } = req.body;
@@ -93,9 +61,9 @@ router.post('/buy', verifyToken, async (req, res) => {
     // Deduct from deposit_balance
     await connection.query('UPDATE users SET deposit_balance = deposit_balance - ? WHERE id = ?', [planPrice, req.user.id]);
     
-    // Create active lease record with last_claim_time set to NOW() so countdown begins immediately
+    // Create active lease record with last_claim_time set to NULL so they can claim immediately upon purchase
     await connection.query(
-      'INSERT INTO leases (user_id, plan_name, price, daily_income, duration, last_claim_time) VALUES (?, ?, ?, ?, ?, NOW())',
+      'INSERT INTO leases (user_id, plan_name, price, daily_income, duration, last_claim_time) VALUES (?, ?, ?, ?, ?, NULL)',
       [req.user.id, plan_name, planPrice, daily_income, duration]
     );
 
@@ -151,7 +119,7 @@ router.post('/buy', verifyToken, async (req, res) => {
     await connection.commit();
     connection.release();
 
-    res.json({ message: `Successfully leased ${plan_name}! Daily revenue will now auto-credit to your withdrawable balance.` });
+    res.json({ message: `Successfully leased ${plan_name}! Daily revenue is ready to claim.` });
   } catch (err) {
     await connection.rollback();
     connection.release();
@@ -160,24 +128,71 @@ router.post('/buy', verifyToken, async (req, res) => {
   }
 });
 
-// Get My Leases (Automatically checks and processes daily earnings strictly once per 24h)
-router.get('/my-leases', verifyToken, async (req, res) => {
+// Claim Daily Income (Enforces 24-hour cooldown between manual claims)
+router.post('/claim', verifyToken, async (req, res) => {
+  const { leaseId } = req.body;
+  if (!leaseId) {
+    return res.status(400).json({ message: 'Lease ID is required.' });
+  }
+
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
 
-    // Automatically process pending daily earnings once per 24 hours
-    await processUserEarnings(req.user.id, connection);
+    const [leases] = await connection.query('SELECT * FROM leases WHERE id = ? AND user_id = ? FOR UPDATE', [leaseId, req.user.id]);
+    if (leases.length === 0) {
+      await connection.rollback();
+      connection.release();
+      return res.status(404).json({ message: 'Active lease not found.' });
+    }
+
+    const lease = leases[0];
+
+    // Check 24-hour cooldown if last_claim_time is already set
+    if (lease.last_claim_time !== null) {
+      const now = new Date();
+      const lastClaim = new Date(lease.last_claim_time);
+      const hoursSinceLastClaim = (now - lastClaim) / (1000 * 60 * 60);
+
+      if (hoursSinceLastClaim < 24) {
+        await connection.rollback();
+        connection.release();
+        return res.status(400).json({ message: 'You can only claim once every 24 hours.' });
+      }
+    }
+
+    const dailyEarnings = parseFloat(lease.daily_income);
+
+    // 1. Add daily income directly to withdrawable balance
+    await connection.query('UPDATE users SET balance = balance + ? WHERE id = ?', [dailyEarnings, req.user.id]);
+
+    // 2. Update last claim timestamp to NOW() to start the 24-hour timer
+    await connection.query('UPDATE leases SET last_claim_time = NOW() WHERE id = ?', [leaseId]);
+
+    // 3. Log transaction history for manual earnings claim
+    await connection.query(
+      'INSERT INTO transactions (user_id, type, description, amount, status) VALUES (?, ?, ?, ?, ?)',
+      [req.user.id, 'earnings', `Daily Income Claim (${lease.plan_name})`, dailyEarnings, 'success']
+    );
 
     await connection.commit();
-
-    const [leases] = await connection.query('SELECT * FROM leases WHERE user_id = ? ORDER BY created_at DESC', [req.user.id]);
     connection.release();
-    res.json({ leases });
+
+    res.json({ message: `Successfully claimed GH₵ ${dailyEarnings.toFixed(2)} to your withdrawable balance!` });
   } catch (err) {
     await connection.rollback();
     connection.release();
-    console.error('Error fetching leases:', err);
+    console.error('Claim error:', err);
+    res.status(500).json({ message: 'Error processing daily claim.', error: err.message });
+  }
+});
+
+// Get My Leases
+router.get('/my-leases', verifyToken, async (req, res) => {
+  try {
+    const [leases] = await pool.query('SELECT * FROM leases WHERE user_id = ? ORDER BY created_at DESC', [req.user.id]);
+    res.json({ leases });
+  } catch (err) {
     res.status(500).json({ message: 'Error fetching active leases.', error: err.message });
   }
 });
